@@ -15,9 +15,9 @@ public:
     QString bundledSkillsRoot() const override;
     bool isNetworkAvailable() const override;
 
-    bool writeSecret(const QString &key, const QString &value, QString *error) override;
-    bool readSecret(const QString &key, QString *value, QString *error) override;
-    bool removeSecret(const QString &key, QString *error) override;
+    bool supportsSecretEncryption() const override;
+    bool protectSecret(const QByteArray &plain, QByteArray *blob, QString *error) override;
+    bool unprotectSecret(const QByteArray &blob, QByteArray *plain, QString *error) override;
 
     bool supportsSelfUpdate() const override;
     bool installUpdate(const QString &packagePath, QString *error) override;

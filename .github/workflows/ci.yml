@@ -16,7 +16,7 @@ jobs:
         uses: jurplel/install-qt-action@v4
         with:
           version: '6.8.3'
-          modules: 'qtdeclarative qtshadertools qtsvg'
+          modules: 'qtdeclarative qtshadertools qtsvg qtmultimedia'
           cache: true
 
       - name: Configure

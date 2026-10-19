@@ -1,5 +1,6 @@
 #pragma once
 
+#include <QByteArray>
 #include <QString>
 
 /**
@@ -29,10 +30,13 @@ public:
     /// 粗略的网络可达性判断；无法判定时返回 true，交由请求层处理错误
     virtual bool isNetworkAvailable() const = 0;
 
-    // --- 本地安全（功能 #5）：转发系统 Keychain / Keystore，本阶段为占位 ---
-    virtual bool writeSecret(const QString &key, const QString &value, QString *error) = 0;
-    virtual bool readSecret(const QString &key, QString *value, QString *error) = 0;
-    virtual bool removeSecret(const QString &key, QString *error) = 0;
+    // --- 本地安全（功能 #5）：系统级加密原语，收敛平台差异；文件读写由 storage/ 负责 ---
+    /// 本平台是否具备**真实**系统级加密能力（上层据此判定"是否已加密安全"，不得假设）
+    virtual bool supportsSecretEncryption() const = 0;
+    /// 明文 -> 密文块（Windows: DPAPI 用户作用域；Android: AndroidKeyStore + AES-GCM）
+    virtual bool protectSecret(const QByteArray &plain, QByteArray *blob, QString *error) = 0;
+    /// 密文块 -> 明文；密文损坏 / 非本机当前用户时返回 false 并写 error，绝不抛异常
+    virtual bool unprotectSecret(const QByteArray &blob, QByteArray *plain, QString *error) = 0;
 
     // --- 安装器（功能 #2）：Win / Android 覆盖升级；Web 承载 iOS，不支持自更新 ---
     virtual bool supportsSelfUpdate() const = 0;

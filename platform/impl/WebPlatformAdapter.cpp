@@ -42,26 +42,29 @@ bool WebPlatformAdapter::isNetworkAvailable() const
     return true;
 }
 
-bool WebPlatformAdapter::writeSecret(const QString &key, const QString &value, QString *error)
+bool WebPlatformAdapter::supportsSecretEncryption() const
 {
-    Q_UNUSED(key)
-    Q_UNUSED(value)
-    return unsupported(error, QStringLiteral("原生密钥库写入"));
+    // Web 端（承载 iOS 用户）没有可用的系统级加密存储：
+    // 明确返回 false，由 storage/SecureStore 拒绝写入并提示用户，绝不降级为明文落盘。
+    return false;
 }
 
-bool WebPlatformAdapter::readSecret(const QString &key, QString *value, QString *error)
+bool WebPlatformAdapter::protectSecret(const QByteArray &plain, QByteArray *blob, QString *error)
 {
-    Q_UNUSED(key)
-    if (value) {
-        value->clear();
+    Q_UNUSED(plain)
+    if (blob) {
+        blob->clear();
     }
-    return unsupported(error, QStringLiteral("原生密钥库读取"));
+    return unsupported(error, QStringLiteral("本地加密存储（Web 端不提供，请改用桌面端保存 API Key）"));
 }
 
-bool WebPlatformAdapter::removeSecret(const QString &key, QString *error)
+bool WebPlatformAdapter::unprotectSecret(const QByteArray &blob, QByteArray *plain, QString *error)
 {
-    Q_UNUSED(key)
-    return unsupported(error, QStringLiteral("原生密钥库删除"));
+    Q_UNUSED(blob)
+    if (plain) {
+        plain->clear();
+    }
+    return unsupported(error, QStringLiteral("本地加密存储（Web 端不提供）"));
 }
 
 bool WebPlatformAdapter::supportsSelfUpdate() const

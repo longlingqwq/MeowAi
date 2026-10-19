@@ -6,9 +6,12 @@
 #include <memory>
 
 class AppPaths;
+class ChatController;
 class Database;
 class DocumentRetriever;
 class PlatformAdapter;
+class PersonalizationStore;
+class SecureStore;
 class SkillRegistry;
 class ThemeManager;
 class UpdateManager;
@@ -38,6 +41,12 @@ public:
 
     ThemeManager *themeManager() const;
     UpdateManager *updateManager() const;
+    /// 个性化配置存储（功能 #11）；只读写 config.json 的 personalization 段
+    PersonalizationStore *personalizationStore() const;
+    /// 敏感数据保险库（功能 #5）；初始化后可用，失败时为 nullptr
+    SecureStore *secureStore() const;
+    /// 对话控制器（功能 #3 / #4）；初始化后可用，失败时为 nullptr
+    ChatController *chatController() const;
 
 signals:
     void statusMessageChanged();
@@ -50,6 +59,9 @@ private:
     std::unique_ptr<Database> m_database;
     std::unique_ptr<SkillRegistry> m_skills;
     std::unique_ptr<DocumentRetriever> m_retriever;
+    std::unique_ptr<PersonalizationStore> m_personalizationStore;
+    std::unique_ptr<SecureStore> m_secureStore;
+    std::unique_ptr<ChatController> m_chat;
     ThemeManager *m_themeManager = nullptr;
     UpdateManager *m_updateManager = nullptr;
     QString m_statusMessage;

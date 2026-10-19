@@ -10,7 +10,7 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-find_package(Qt6 6.5 REQUIRED COMPONENTS Core Gui Qml Quick Network Sql Test)
+find_package(Qt6 6.5 REQUIRED COMPONENTS Core Gui Qml Quick Network Sql Test Multimedia QuickControls2)
 
 qt_standard_project_setup(REQUIRES 6.5)
 
@@ -26,6 +26,7 @@ option(MEOWAI_BUILD_TESTS "构建单元测试" ON)
 # ---------------------------------------------------------------------------
 add_library(MeowAiLib STATIC
     core/AppController.cpp
+    core/chat/ChatController.cpp
     core/library/LibraryManager.cpp
     core/library/CategoryManager.cpp
     core/library/BackupManager.cpp
@@ -35,12 +36,18 @@ add_library(MeowAiLib STATIC
     core/update/UpdateManager.cpp
 
     providers/ProviderFactory.cpp
+    providers/AiProvider.cpp
     providers/OpenAiProvider.cpp
     providers/AnthropicProvider.cpp
-    providers/AiProvider.h  # 仅接口的头文件，需显式列出以触发 AUTOMOC
+    providers/SseStreamParser.cpp
+    providers/NetworkTransport.cpp
+    providers/ProviderUtils.cpp
+    providers/AiProvider.h        # 仅接口的头文件，需显式列出以触发 AUTOMOC
+    providers/NetworkTransport.h  # 含 Q_OBJECT，需显式列出以触发 AUTOMOC
 
     storage/AppPaths.cpp
     storage/Database.cpp
+    storage/PersonalizationStore.cpp
     storage/SecureStore.cpp
 
     platform/PlatformAdapterFactory.cpp
@@ -55,10 +62,19 @@ target_link_libraries(MeowAiLib
     PUBLIC Qt6::Core Qt6::Gui Qt6::Network Qt6::Sql
 )
 
+if(WIN32)
+    # DPAPI（CryptProtectData / CryptUnprotectData）：API Key 本地加密（功能 #5）
+    target_link_libraries(MeowAiLib PRIVATE crypt32)
+endif()
+
 # ---------------------------------------------------------------------------
 # 可执行程序：最小可运行 QML 主窗口
 # ---------------------------------------------------------------------------
 qt_add_executable(MeowAi main.cpp)
+
+# 设计令牌 Theme.qml 是 QML 单例：必须显式声明为 singleton，
+# 否则生成的 qmldir 会把它当成普通类型，Theme.<token> 全部解析为 undefined。
+set_source_files_properties(ui/Theme.qml PROPERTIES QT_QML_SINGLETON_TYPE TRUE)
 
 qt_add_qml_module(MeowAi
     URI MeowAi
@@ -66,6 +82,21 @@ qt_add_qml_module(MeowAi
     QML_FILES
         ui/main.qml
         ui/Theme.qml
+        # 组件库（平铺于 ui/，依赖同目录隐式导入，避免子目录 qmldir 风险）
+        ui/MSurface.qml
+        ui/MLabel.qml
+        ui/MButton.qml
+        ui/MField.qml
+        ui/MCombo.qml
+        ui/MSwitch.qml
+        ui/MChip.qml
+        ui/MGlow.qml
+        ui/EyeMark.qml
+        ui/MAvatar.qml
+        # 页面
+        ui/ConversationPage.qml
+        ui/PersonalizationPage.qml
+        ui/SplashVideo.qml
 )
 
 # 内置 Skill 资源（功能 #9）：运行期路径为 ":/skills/<id>/manifest.json"
@@ -77,7 +108,10 @@ qt_add_resources(MeowAi "skills"
         resources/skills/example/skill.md
 )
 
-target_link_libraries(MeowAi PRIVATE MeowAiLib Qt6::Quick)
+# 可执行程序是 QML 宿主：Multimedia 仅用于 QML 侧开屏视频播放（功能 #11），
+# QuickControls2 仅用于在 main.cpp 里锁定 Basic 样式（全自绘 UI 的前提），
+# 两者都不进入 core 层，保持分层不被污染。
+target_link_libraries(MeowAi PRIVATE MeowAiLib Qt6::Quick Qt6::Multimedia Qt6::QuickControls2)
 
 # ---------------------------------------------------------------------------
 # 单元测试

@@ -3,13 +3,14 @@
 #include "providers/AnthropicProvider.h"
 #include "providers/OpenAiProvider.h"
 
-AiProvider *ProviderFactory::create(AiProvider::Protocol protocol, QObject *parent)
+std::unique_ptr<AiProvider> ProviderFactory::create(AiProvider::Protocol protocol,
+                                                    NetworkTransport *transport)
 {
     switch (protocol) {
     case AiProvider::OpenAI:
-        return new OpenAiProvider(parent);
+        return std::make_unique<OpenAiProvider>(transport);
     case AiProvider::Anthropic:
-        return new AnthropicProvider(parent);
+        return std::make_unique<AnthropicProvider>(transport);
     }
     return nullptr;
 }

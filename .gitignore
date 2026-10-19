@@ -54,3 +54,7 @@ library/
 categories/
 backups/
 assets/
+
+# ---- Misc / local logs ----
+aqtinstall.log
+*.log
