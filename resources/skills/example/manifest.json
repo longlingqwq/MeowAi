@@ -1,0 +1,7 @@
+{
+  "id": "example",
+  "name": "示例技能",
+  "version": "0.1.0",
+  "description": "演示内置 Skill 的 manifest 规范与加载方式",
+  "entry": "skill.md"
+}

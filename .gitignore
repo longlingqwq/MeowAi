@@ -1,0 +1,56 @@
+# ---- Build output ----
+build/
+build-*/
+out/
+cmake-build-*/
+CMakeCache.txt
+CMakeFiles/
+CMakeUserPresets.json
+*.user
+*.user.*
+
+# ---- Qt ----
+moc_*.cpp
+qrc_*.cpp
+ui_*.h
+*.moc
+*.qmlc
+*.jsc
+.qmake.stash
+*_qmltyperegistrations.cpp
+.qmllint.ini
+
+# ---- Compiled artifacts ----
+*.o
+*.obj
+*.a
+*.lib
+*.exe
+*.dll
+*.so
+*.dylib
+*.pdb
+*.ilk
+*.exp
+*.apk
+*.aab
+*.wasm
+
+# ---- IDE / Editor ----
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# ---- OS ----
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+# ---- Local runtime data (never commit user data) ----
+config.json
+library/
+categories/
+backups/
+assets/
