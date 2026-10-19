@@ -42,6 +42,12 @@ bool WebPlatformAdapter::isNetworkAvailable() const
     return true;
 }
 
+bool WebPlatformAdapter::supportsCustomTitleBar() const
+{
+    // Web / WASM 由宿主（浏览器 / iOS 壳）提供窗口 chrome，自绘标题栏无意义
+    return false;
+}
+
 bool WebPlatformAdapter::supportsSecretEncryption() const
 {
     // Web 端（承载 iOS 用户）没有可用的系统级加密存储：

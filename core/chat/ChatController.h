@@ -7,6 +7,7 @@
 
 #include <memory>
 
+class ChatHistoryModel;
 class SecureStore;
 
 /**
@@ -31,7 +32,9 @@ class ChatController : public QObject
     Q_PROPERTY(bool imagesConfirmed READ imagesConfirmed WRITE setImagesConfirmed NOTIFY imagesConfirmedChanged)
 
 public:
-    explicit ChatController(SecureStore *store, QObject *parent = nullptr);
+    /// history 可为 nullptr（保持与阶段二调用方兼容）：为空时退化为单条消息请求
+    explicit ChatController(SecureStore *store, ChatHistoryModel *history = nullptr,
+                            QObject *parent = nullptr);
     ~ChatController() override;
 
     QString providerId() const;
@@ -66,11 +69,14 @@ signals:
 
 private:
     void ensureProvider();
+    /// 组装一轮请求：写入会话历史（可用时）、按有界上下文补全 messages，再交给 Provider
+    void dispatchUserMessage(const ChatMessage &userMessage);
     void sendRequest(const ChatRequest &request);
     void setBusy(bool busy);
     void setLastError(const QString &message);
 
     SecureStore *m_store = nullptr;
+    ChatHistoryModel *m_history = nullptr;
     std::unique_ptr<AiProvider> m_provider;
     QString m_providerId = QStringLiteral("openai");
     QString m_model;

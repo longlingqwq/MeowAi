@@ -7,9 +7,9 @@ import MeowAi
 /**
  * 应用外壳（Nocturne / 琥珀猫眼）。
  *
- * 只负责"舞台"与导航：背景氛围、左侧导航栏、顶栏、页面切换、开屏覆盖层。
+ * 只负责"舞台"与导航：背景氛围、自绘标题栏、左侧导航栏、顶栏、页面切换、开屏覆盖层。
  * 页面本身（ConversationPage / PersonalizationPage）各自独立，互不引用。
- * 业务全部经 App / Chat / Personalize 转发，本文件不含任何业务逻辑。
+ * 业务全部经 App / Chat / History / Personalize / ThemePreset 转发，本文件不含业务逻辑。
  */
 Window {
     id: root
@@ -22,20 +22,25 @@ Window {
     title: App.appName + " · " + App.platformId
     color: Theme.ink0
 
+    /// 桌面端用无边框自绘标题栏；Android / Web 回退原生 chrome（见 PlatformAdapter）
+    flags: App.customTitleBar ? (Qt.Window | Qt.FramelessWindowHint) : Qt.Window
+
     property int pageIndex: 0
     /// 开屏是否已消费掉（避免改完设置后反复自动播放）
     property bool splashConsumed: false
     /// 是否为「手动预览」触发的一次播放
     property bool previewing: false
+    /// 自绘标题栏高度：非桌面端为 0，此时内容整体上移
+    readonly property int titleBarHeight: App.customTitleBar ? 38 : 0
 
     // ================================================================= 舞台
     // 1) 墨色渐变底
     Rectangle {
         anchors.fill: parent
         gradient: Gradient {
-            GradientStop { position: 0.0; color: "#12161E" }
-            GradientStop { position: 0.52; color: "#0E1118" }
-            GradientStop { position: 1.0; color: "#08090D" }
+            GradientStop { position: 0.0; color: Theme.stageTop }
+            GradientStop { position: 0.52; color: Theme.stageMid }
+            GradientStop { position: 1.0; color: Theme.stageBottom }
         }
     }
 
@@ -82,14 +87,26 @@ Window {
     Item {
         anchors.fill: parent
 
+        // ------------------------------------------------ 自绘标题栏（阶段三）
+        TitleBar {
+            id: titleBar
+            anchors.left: parent.left
+            anchors.right: parent.right
+            anchors.top: parent.top
+            height: root.titleBarHeight
+            visible: App.customTitleBar
+            targetWindow: root
+            pageTitle: root.pageIndex === 0 ? qsTr("对话") : qsTr("个性化")
+        }
+
         // ------------------------------------------------ 左侧导航栏
         Rectangle {
             id: navRail
             anchors.left: parent.left
-            anchors.top: parent.top
+            anchors.top: titleBar.bottom
             anchors.bottom: parent.bottom
             width: 228
-            color: "#99080A0E"
+            color: Theme.navRail
 
             Rectangle {
                 anchors.right: parent.right
@@ -158,7 +175,7 @@ Window {
                             radius: Theme.rMd
                             color: parent.current
                                    ? Theme.accentGhost
-                                   : (navChatHover.hovered ? "#0DFFFFFF" : "transparent")
+                                   : (navChatHover.hovered ? Theme.overlayFaint : "transparent")
 
                             Behavior on color {
                                 ColorAnimation { duration: Theme.dFast }
@@ -200,7 +217,7 @@ Window {
                             radius: Theme.rMd
                             color: parent.current
                                    ? Theme.accentGhost
-                                   : (navPersoHover.hovered ? "#0DFFFFFF" : "transparent")
+                                   : (navPersoHover.hovered ? Theme.overlayFaint : "transparent")
 
                             Behavior on color {
                                 ColorAnimation { duration: Theme.dFast }
@@ -281,7 +298,7 @@ Window {
         Column {
             anchors.left: navRail.right
             anchors.right: parent.right
-            anchors.top: parent.top
+            anchors.top: titleBar.bottom
             anchors.bottom: parent.bottom
             spacing: 0
 
@@ -307,7 +324,7 @@ Window {
                     Text {
                         text: root.pageIndex === 0
                               ? qsTr("与本地助理交谈")
-                              : qsTr("字体 · 背景 · 头像 · 开屏")
+                              : qsTr("主题 · 字体 · 背景 · 头像 · 开屏")
                         color: Theme.textFaint
                         font.pixelSize: Theme.fSmall
                     }
@@ -371,6 +388,81 @@ Window {
                         }
                     }
                 }
+            }
+        }
+
+        // ------------------------------------------------ 无边框窗口缩放边框
+        // Windows 由 platform 层原生助手接管 WM_NCHITTEST；
+        // 其它桌面平台在此用 QWindow::startSystemResize（槽，QML 可直接调用）兜底。
+        Item {
+            id: resizeFrame
+            anchors.fill: parent
+            visible: App.customTitleBar
+            z: 1000
+
+            MouseArea {
+                anchors.left: parent.left
+                anchors.top: parent.top
+                anchors.bottom: parent.bottom
+                width: 6
+                cursorShape: Qt.SizeHorCursor
+                onPressed: root.startSystemResize(Qt.LeftEdge)
+            }
+            MouseArea {
+                anchors.right: parent.right
+                anchors.top: parent.top
+                anchors.bottom: parent.bottom
+                width: 6
+                cursorShape: Qt.SizeHorCursor
+                onPressed: root.startSystemResize(Qt.RightEdge)
+            }
+            MouseArea {
+                anchors.left: parent.left
+                anchors.right: parent.right
+                anchors.top: parent.top
+                height: 6
+                cursorShape: Qt.SizeVerCursor
+                onPressed: root.startSystemResize(Qt.TopEdge)
+            }
+            MouseArea {
+                anchors.left: parent.left
+                anchors.right: parent.right
+                anchors.bottom: parent.bottom
+                height: 6
+                cursorShape: Qt.SizeVerCursor
+                onPressed: root.startSystemResize(Qt.BottomEdge)
+            }
+            MouseArea {
+                anchors.left: parent.left
+                anchors.top: parent.top
+                width: 6
+                height: 6
+                cursorShape: Qt.SizeFDiagCursor
+                onPressed: root.startSystemResize(Qt.TopEdge | Qt.LeftEdge)
+            }
+            MouseArea {
+                anchors.right: parent.right
+                anchors.top: parent.top
+                width: 6
+                height: 6
+                cursorShape: Qt.SizeBDiagCursor
+                onPressed: root.startSystemResize(Qt.TopEdge | Qt.RightEdge)
+            }
+            MouseArea {
+                anchors.left: parent.left
+                anchors.bottom: parent.bottom
+                width: 6
+                height: 6
+                cursorShape: Qt.SizeBDiagCursor
+                onPressed: root.startSystemResize(Qt.BottomEdge | Qt.LeftEdge)
+            }
+            MouseArea {
+                anchors.right: parent.right
+                anchors.bottom: parent.bottom
+                width: 6
+                height: 6
+                cursorShape: Qt.SizeFDiagCursor
+                onPressed: root.startSystemResize(Qt.BottomEdge | Qt.RightEdge)
             }
         }
     }

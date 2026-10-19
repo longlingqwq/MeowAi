@@ -57,8 +57,8 @@ Item {
         anchors.top: parent.top
         height: parent.height * 0.24
         gradient: Gradient {
-            GradientStop { position: 0.0; color: "#8C08090D" }
-            GradientStop { position: 1.0; color: "#0008090D" }
+            GradientStop { position: 0.0; color: Theme.splashScrimTop }
+            GradientStop { position: 1.0; color: "transparent" }
         }
     }
 
@@ -68,8 +68,8 @@ Item {
         anchors.bottom: parent.bottom
         height: parent.height * 0.34
         gradient: Gradient {
-            GradientStop { position: 0.0; color: "#0008090D" }
-            GradientStop { position: 1.0; color: "#D908090D" }
+            GradientStop { position: 0.0; color: "transparent" }
+            GradientStop { position: 1.0; color: Theme.splashScrimBottom }
         }
     }
 
@@ -82,7 +82,7 @@ Item {
         width: skipRow.implicitWidth + Theme.s5
         height: 34
         radius: Theme.rPill
-        color: skipHover.hovered ? "#2EFFFFFF" : "#14FFFFFF"
+        color: skipHover.hovered ? Theme.overlayStrong : Theme.overlayHover
         border.width: 1
         border.color: skipHover.hovered ? Theme.hairlineStrong : Theme.hairline
 

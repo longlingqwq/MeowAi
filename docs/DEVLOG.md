@@ -39,6 +39,54 @@
 
 ## 四、日志（按时间倒序，最新在最上）
 
+### 2026-10-19 ｜ 无边框自绘标题栏（阶段三·模块③）｜ 状态：待验收
+- **阶段**：阶段三（会话历史模型 + 主题系统 + 无边框标题栏）
+- **负责人**：开发 Agent（待补充）
+- **分支 / PR**：`v0.2.1`（PR 待创建）
+- **交付内容**：
+  - `platform/PlatformAdapter.h` 新增纯虚能力标志 `supportsCustomTitleBar()`：Desktop = `true`，Android / Web = `false`（**非桌面端明确回退系统原生标题栏，不做无边框**）
+  - 新增 `platform/TitleBarHelper.h` + `platform/impl/TitleBarHelper.cpp`：Windows 分支为原生 `QAbstractNativeEventFilter`，处理 `WM_NCHITTEST`（外圈 6px 返回缩放边框码）/ `WM_NCCALCSIZE`（返回 0，去系统边框）/ `WM_GETMINMAXINFO`（最大化贴合工作区）；补 `WS_THICKFRAME | WS_MAXIMIZEBOX | WS_MINIMIZEBOX | WS_SYSMENU` 并以 `DWMNCRP_DISABLED` 关闭 DWM 非客户区绘制；**非 Windows 返回 nullptr**，交由 QML 侧兜底
+  - 新增 `ui/TitleBar.qml`：自绘标题栏（`startSystemMove()` 拖拽、双击切换最大化还原、最小化 / 最大化还原 / 关闭三个按钮，关闭按钮危险色）
+  - `ui/main.qml`：`flags` 按平台能力切换 `FramelessWindowHint`；插入自绘标题栏并抬高内容区；新增 `resizeFrame`（8 个 6px 边条 MouseArea 调用 `startSystemResize`）作为原生命中的**第二重保险**，杜绝「窗口无法拖动 / 无法关闭」
+  - `main.cpp`：界面加载后按 `customTitleBar()` 安装 `MeowAiPlatform::installTitleBarHelper(window)`
+  - **工程修复**：`CMakeLists.txt` 为可执行程序设 `WIN32_EXECUTABLE TRUE` —— 修复「打开 Demo 时后面弹出命令行窗口、关掉命令行 Demo 也跟着关」的问题，现在**只出现一个 Demo 窗口**
+- **自测**：本地 Debug 构建通过；`ctest` **9/9** 通过；`MeowAi.exe --smoke-test` 退出码 0；**运行期 QML 警告数为 0**
+- **遗留 / 待定**：标题栏拖拽 / 缩放 / 最大化还原 / 关闭的**人工点击验证**待图形界面手测（DoD 第 3 条）；Linux / macOS 无原生助手、仅 QML 兜底（项目当前不交付这两端）
+- **备注**：标题栏在任何情况下**都不得出现无法拖动或无法关闭**的情形
+
+### 2026-10-19 ｜ 主题系统（阶段三·模块②）｜ 状态：待验收
+- **阶段**：阶段三（会话历史模型 + 主题系统 + 无边框标题栏）
+- **负责人**：开发 Agent（待补充）
+- **分支 / PR**：`v0.2.1`（PR 待创建）
+- **交付内容**：
+  - `ui/Theme.qml` 全部设计令牌由 `readonly property` 改为 `property` —— 令牌可**运行期改写**且 QML 属性自带变更通知，绑定即时刷肤；新增 17 个令牌（`overlayFaint/overlaySubtle/overlayHover/overlayStrong`、`shadow`、`accentShadow`、`dangerPress/dangerHair/dangerHairStrong`、`okGhost/okHair`、`navRail`、`stageTop/stageMid/stageBottom`、`splashScrimTop/splashScrimBottom`）；旧令牌 `background/surface/foreground/muted/spacing` 保留为兼容绑定
+  - 新增主题预设资源 `resources/themes/theme1.json`（`Nocturne 琥珀`，深色，与原配色一致）与 `theme2.json`（`Daylight 浅蓝`，**浅色系**）；两文件令牌集**完全一致**（44 色 + 22 整数 + 2 缓动 = 68），色值统一 `#AARRGGBB`
+  - 新增 `storage/ThemeStore`：只读写 `config.json` 的 `theme` 段（键 `preset`），**读改写回保留其他模块的键**，`QSaveFile` 原子写，损坏 JSON 以空对象重建
+  - 新增 `core/theme/ThemePresetManager`：扫描 `:/themes/*.json`、`selectPreset(id)`、`attachThemeObject(QObject*)`（用 `QObject::setProperty` 逐令牌写入 QML 单例）、**令牌契约漂移检测**（预设缺令牌即报错）；刻意**不依赖 Qt Qml 模块**，避免 core 反向依赖 ui
+  - `core/theme/ThemeManager` **保持纯个性化职责**（字体 / 背景 / 头像 / 开屏），**不改名、不合并**
+  - 装配：`main.cpp` 用 `engine.singletonInstance` 解析 QML 单例 `Theme` 并注入 `attachThemeObject`；新增上下文属性 `ThemePreset`
+  - `ui/PersonalizationPage.qml`：新增「主题」卡（预设按钮 + 当前选中态 + 错误提示）
+  - **硬编码色收归**：`ui/` 下除 `Theme.qml` 的令牌定义外**无残留 hex 色**（`MButton` / `MSurface` / `MChip` / `SplashVideo` / `ConversationPage` 等全部改用令牌）
+- **自测**：本地 Debug 构建通过；`ctest` **9/9** 通过；`--smoke-test` 退出码 0；QML 警告 0。新增 `tests/tst_themepreset.cpp`（6 项）：预设解析（多种取值形态）、损坏输入拒绝、令牌写入并上报漂移、加载并持久化选择、未知预设拒绝、**无存储依赖时保持默认不崩**
+- **遗留 / 待定**：运行期换肤（深色 ↔ 浅蓝）的**目视效果**待人工手测
+- **备注**：新增令牌**必须同步补进所有预设**，否则漂移检测会报错；主题持久化与个性化配置同存 `config.json` 但**键段互不覆盖**
+
+### 2026-10-19 ｜ 会话历史模型（阶段三·模块①）｜ 状态：待验收
+- **阶段**：阶段三（会话历史模型 + 主题系统 + 无边框标题栏）
+- **负责人**：开发 Agent（待补充）
+- **分支 / PR**：`v0.2.1`（PR 待创建）
+- **交付内容**：
+  - `storage/Database`：`ensureSchema` 重写为**幂等前向迁移** —— 连接级 `PRAGMA foreign_keys = ON` / `journal_mode = WAL` / `busy_timeout = 3000`，版本记录于 `meta.schema_version`；v1 迁移建 `conversations` / `messages` / `message_attachments` 与索引 `idx_messages_conversation`（仅前向、不回退、不删除既有表）
+  - 新增 `storage/ChatStore`：会话历史记录读写（会话增 / 删 / 改名 / 触碰时间，消息增 / 查 / 改，中断遗留 `streaming` 降级 `partial`），**只做记录读写、不含业务判断**；时间戳统一**毫秒级**并保证被触碰会话严格排到最前；null 字符串统一规范为空串（避免 `QString()` 被绑定成 SQL `NULL` 触发 `NOT NULL` 约束失败）
+  - 新增 `core/chat/ChatHistoryModel`（`QAbstractListModel`）：角色 `role/content/messageId/status/createdAt`；`Q_INVOKABLE` 新建 / 打开 / 重命名 / 删除会话；**流式 400ms 节流落库 + 终局落库**；首条用户消息自动生成会话标题；`requestHistory(maxMessages, maxChars)` 输出**有界上下文**（跳过空占位与 `error` 行，条数 / 字符双限）；依赖缺失时构造即给出明确错误、**安全降级不崩**
+  - `core/chat/ChatController` 扩展：新增 `dispatchUserMessage()` —— 发送时写入用户消息 + 创建助手占位、请求携带**有界历史**；流式增量 / 终局 / 失败（取消→`partial`，其余→`error`，**保留已生成内容**）分别落到模型
+  - `core/AppController` / `main.cpp`：装配 `ChatStore` + `ChatHistoryModel` 并 `reload()`，注入上下文属性 `History`
+  - `ui/ConversationPage.qml`：新增**左列会话列表**（＋新对话 / 点击切换 / 悬停删除 / 当前高亮）与消息流改绑**真实模型**（流式呼吸竖线、`error` 危险色、空态、不可用提示）；**UI 只绑定模型，不直连数据库**
+  - 上述 UI 全部落在 `ui/` 模块内，便于后续在 ui 模块内自定义各组件位置
+- **自测**：本地 Debug 构建通过；`ctest` **9/9** 通过（新增 `tests/tst_chatstore.cpp` 7 项：表结构幂等迁移、会话 CRUD 与排序、消息生命周期**跨重开保留**、流式节流后落库、中断遗留降级 `partial`、上下文有界裁剪、**无数据库降级不崩**）；`--smoke-test` 退出码 0；QML 警告 0
+- **遗留 / 待定**：多轮上下文与历史保留的**真实联网手测**需有效 Key（DoD 第 3 条）；图片仅补在末条、**不落库**（图片附件表已预留，待后续模块）
+- **备注**：`messages` 通过外键 `ON DELETE CASCADE` 随会话一并清理；历史对话**持久保留**，可随时**新开对话**，上下文交互保持流畅（有界裁剪）
+
 ### 2026-10-19 ｜ 前端精细化重设计（UI 层）｜ 状态：待验收
 - **阶段**：阶段二（核心基础模块）
 - **负责人**：开发 Agent（待补充）

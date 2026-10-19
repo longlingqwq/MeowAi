@@ -71,6 +71,12 @@ bool DesktopPlatformAdapter::isNetworkAvailable() const
     return true;
 }
 
+bool DesktopPlatformAdapter::supportsCustomTitleBar() const
+{
+    // 桌面端窗口 chrome 交由 QML 自绘（阶段三）；Android / Web 另行回退
+    return true;
+}
+
 bool DesktopPlatformAdapter::supportsSecretEncryption() const
 {
 #if defined(Q_OS_WIN)

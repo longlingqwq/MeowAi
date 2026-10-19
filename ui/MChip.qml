@@ -17,17 +17,17 @@ Rectangle {
     color: {
         switch (root.tone) {
         case "accent": return Theme.accentGhost
-        case "ok":     return "#1F7FC8A0"
+        case "ok":     return Theme.okGhost
         case "danger": return Theme.dangerGhost
-        default:       return "#14FFFFFF"
+        default:       return Theme.overlayHover
         }
     }
     border.width: 1
     border.color: {
         switch (root.tone) {
         case "accent": return Theme.accentHair
-        case "ok":     return "#3D7FC8A0"
-        case "danger": return "#3DE5605A"
+        case "ok":     return Theme.okHair
+        case "danger": return Theme.dangerHair
         default:       return Theme.hairline
         }
     }

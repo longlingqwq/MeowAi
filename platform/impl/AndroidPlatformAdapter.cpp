@@ -203,6 +203,12 @@ bool AndroidPlatformAdapter::isNetworkAvailable() const
     return true;
 }
 
+bool AndroidPlatformAdapter::supportsCustomTitleBar() const
+{
+    // Android 使用系统状态栏与任务栏语义，回退原生 chrome
+    return false;
+}
+
 bool AndroidPlatformAdapter::supportsSecretEncryption() const
 {
 #if defined(Q_OS_ANDROID)

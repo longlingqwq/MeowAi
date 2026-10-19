@@ -40,15 +40,15 @@ Button {
             if (root.variant === "primary")
                 return root.down ? Theme.accentDeep : (root.hovered ? Theme.accentHi : Theme.accent)
             if (root.variant === "danger")
-                return root.down ? "#33E5605A" : (root.hovered ? Theme.dangerGhost : "transparent")
+                return root.down ? Theme.dangerPress : (root.hovered ? Theme.dangerGhost : "transparent")
             if (root.variant === "quiet")
-                return root.hovered ? "#14FFFFFF" : "transparent"
-            return root.down ? "#26FFFFFF" : (root.hovered ? "#14FFFFFF" : "transparent")
+                return root.hovered ? Theme.overlayHover : "transparent"
+            return root.down ? Theme.overlayStrong : (root.hovered ? Theme.overlayHover : "transparent")
         }
         border.width: (root.variant === "ghost" || root.variant === "danger") ? 1 : 0
         border.color: {
             if (root.variant === "danger")
-                return root.hovered ? "#66E5605A" : "#3DE5605A"
+                return root.hovered ? Theme.dangerHairStrong : Theme.dangerHair
             if (root.variant === "ghost")
                 return root.hovered ? Theme.hairlineStrong : Theme.hairline
             return "transparent"
@@ -66,7 +66,7 @@ Button {
         layer.enabled: root.variant === "primary" && root.enabled
         layer.effect: MultiEffect {
             shadowEnabled: true
-            shadowColor: "#4DF2A63C"
+            shadowColor: Theme.accentShadow
             shadowBlur: 0.6
             shadowVerticalOffset: 2
         }

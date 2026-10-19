@@ -35,6 +35,66 @@ Item {
                 lineHeight: 1.5
             }
 
+            // ------------------------------------------------ 主题（阶段三）
+            MSurface {
+                width: parent.width
+                height: themeSection.implicitHeight + Theme.s5 * 2
+
+                Column {
+                    id: themeSection
+                    anchors.left: parent.left
+                    anchors.right: parent.right
+                    anchors.top: parent.top
+                    anchors.margins: Theme.s5
+                    spacing: Theme.s3
+
+                    Row {
+                        spacing: Theme.s3
+
+                        MLabel {
+                            label: qsTr("主题")
+                            anchors.verticalCenter: parent.verticalCenter
+                        }
+
+                        Text {
+                            text: qsTr("换主题只替换设计令牌的值，不写任何界面代码；选择会记住，重启后保持。")
+                            color: Theme.textFaint
+                            font.pixelSize: Theme.fSmall
+                            anchors.verticalCenter: parent.verticalCenter
+                        }
+                    }
+
+                    Flow {
+                        width: parent.width
+                        spacing: Theme.s2
+
+                        Repeater {
+                            model: ThemePreset.presets
+
+                            delegate: MButton {
+                                required property var modelData
+
+                                text: modelData.name
+                                variant: modelData.id === ThemePreset.currentPresetId
+                                         ? "primary"
+                                         : "ghost"
+                                small: true
+                                onClicked: ThemePreset.selectPreset(modelData.id)
+                            }
+                        }
+                    }
+
+                    Text {
+                        visible: ThemePreset.lastError.length > 0
+                        width: parent.width
+                        text: ThemePreset.lastError
+                        color: Theme.danger
+                        font.pixelSize: Theme.fSmall
+                        wrapMode: Text.Wrap
+                    }
+                }
+            }
+
             // ------------------------------------------------ 字体
             MSurface {
                 width: parent.width
@@ -450,7 +510,7 @@ Item {
                 visible: Personalize.lastError.length > 0
                 radius: Theme.rMd
                 fill: Theme.dangerGhost
-                stroke: "#3DE5605A"
+                stroke: Theme.dangerHair
 
                 Text {
                     id: errorText

@@ -33,7 +33,7 @@ Rectangle {
     layer.enabled: elevated
     layer.effect: MultiEffect {
         shadowEnabled: true
-        shadowColor: "#A6000000"
+        shadowColor: Theme.shadow
         shadowBlur: 0.55
         shadowVerticalOffset: 8
         shadowHorizontalOffset: 0

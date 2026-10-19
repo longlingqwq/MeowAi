@@ -19,6 +19,7 @@ public:
     QString cacheRoot() const override;
     QString bundledSkillsRoot() const override;
     bool isNetworkAvailable() const override;
+    bool supportsCustomTitleBar() const override;
 
     bool supportsSecretEncryption() const override;
     bool protectSecret(const QByteArray &plain, QByteArray *blob, QString *error) override;

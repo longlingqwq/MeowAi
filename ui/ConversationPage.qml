@@ -2,34 +2,30 @@ import QtQuick
 import QtQuick.Controls
 
 /**
- * 对话页：连接设置（可折叠）+ 消息流 + 输入条。
+ * 对话页：**左侧会话列表**（多会话 / 新建 / 切换 / 删除）+ 连接设置（可折叠）+ 消息流 + 输入条。
  *
- * 纯展示与绑定，业务全部经 Chat（ChatController）转发，本文件不碰网络与密钥。
+ * 纯展示与绑定：
+ *  - 消息流直接绑定 core 的会话历史模型 `History`（ChatHistoryModel），
+ *    持久化、上下文裁剪、流式节流都在 core 层，本文件不碰数据库；
+ *  - 发送经 `Chat`（ChatController）转发，本文件不碰网络与密钥。
  *
- * 【临时方案】core 层目前只暴露单个流式的 replyText，没有历史消息模型，
- * 因此这里用 QML 侧 ListModel 维护"展示用 transcript"（进程内有效，重启即清空）。
- * 待 core 提供真实会话历史后替换，已记入 docs/DEVLOG.md。
+ * 布局全部在本文件内自由编排（阶段三要求：UI 组件位置可在 ui 模块内自定义）。
  */
 Item {
     id: page
 
-    ListModel { id: transcript }
-
     /// 气泡最大宽度：任何一行都不该横贯整个窗口
-    readonly property real bubbleMaxWidth: Math.min(680, width * 0.8)
+    readonly property real bubbleMaxWidth: Math.min(620, Math.max(320, page.width - 260) * 0.78)
+    /// 统一展示的错误：优先网络 / 密钥错误，其次会话历史错误
+    readonly property string errorText: Chat.lastError.length > 0 ? Chat.lastError : History.lastError
 
-    /// 组装一次发送：先落用户气泡，再按是否带图调用对应接口
+    /// 组装一次发送：用户消息由 core 落库入模型，这里只负责转发与清空输入
     function submit() {
         const text = composerField.text.trim()
         if (text.length === 0 || Chat.busy)
             return
 
         const imagePath = imageField.text.trim()
-        transcript.append({
-                              "role": "user",
-                              "text": imagePath.length > 0 ? text + "\n[附图] " + imagePath : text
-                          })
-
         if (imagePath.length > 0)
             Chat.sendWithImage(text, imagePath)
         else
@@ -39,30 +35,159 @@ Item {
         transcriptView.positionViewAtEnd()
     }
 
-    Connections {
-        target: Chat
+    // ================================================================= 会话列表
+    MSurface {
+        id: convPanel
+        anchors.left: parent.left
+        anchors.top: parent.top
+        anchors.bottom: parent.bottom
+        width: 208
 
-        // 一轮结束：把完整回复固化进 transcript
-        function onBusyChanged() {
-            if (!Chat.busy && Chat.replyText.length > 0) {
-                transcript.append({ "role": "assistant", "text": Chat.replyText })
-                transcriptView.positionViewAtEnd()
-            }
+        MButton {
+            id: newConvBtn
+            anchors.left: parent.left
+            anchors.right: parent.right
+            anchors.top: parent.top
+            anchors.leftMargin: Theme.s3
+            anchors.rightMargin: Theme.s3
+            anchors.topMargin: Theme.s3
+            text: qsTr("＋ 新对话")
+            variant: "primary"
+            small: true
+            onClicked: History.newConversation()
         }
 
-        // 流式增量：保持视图贴底
-        function onReplyTextChanged() {
-            if (Chat.busy)
-                transcriptView.positionViewAtEnd()
+        MLabel {
+            id: convLabel
+            anchors.left: parent.left
+            anchors.top: newConvBtn.bottom
+            anchors.leftMargin: Theme.s3
+            anchors.topMargin: Theme.s4
+            label: qsTr("会话")
+            tone: Theme.textGhost
+        }
+
+        ListView {
+            id: convList
+            anchors.left: parent.left
+            anchors.right: parent.right
+            anchors.top: convLabel.bottom
+            anchors.bottom: parent.bottom
+            anchors.leftMargin: Theme.s1
+            anchors.rightMargin: Theme.s1
+            anchors.topMargin: Theme.s2
+            anchors.bottomMargin: Theme.s3
+            clip: true
+            spacing: 2
+            boundsBehavior: Flickable.StopAtBounds
+            model: History.conversations
+
+            ScrollBar.vertical: ScrollBar {
+                id: convScroll
+                policy: ScrollBar.AsNeeded
+                width: 6
+                background: Item { }
+
+                contentItem: Rectangle {
+                    implicitWidth: 3
+                    radius: 2
+                    color: convScroll.pressed ? Theme.accent : Theme.hairlineStrong
+                    opacity: convScroll.active ? 0.9 : 0.35
+                }
+            }
+
+            delegate: Item {
+                id: convItem
+                required property var modelData
+
+                width: ListView.view ? ListView.view.width : 0
+                height: 38
+
+                readonly property bool current: History.conversationId === convItem.modelData.id
+
+                Rectangle {
+                    anchors.fill: parent
+                    radius: Theme.rMd
+                    color: convItem.current
+                           ? Theme.accentGhost
+                           : (convHover.hovered ? Theme.overlayFaint : "transparent")
+
+                    Behavior on color {
+                        ColorAnimation { duration: Theme.dFast }
+                    }
+                }
+
+                Rectangle {
+                    visible: convItem.current
+                    anchors.left: parent.left
+                    anchors.verticalCenter: parent.verticalCenter
+                    width: 2
+                    height: 16
+                    radius: 1
+                    color: Theme.accent
+                }
+
+                Text {
+                    anchors.left: parent.left
+                    anchors.leftMargin: Theme.s2 + 4
+                    anchors.right: delBtn.left
+                    anchors.rightMargin: Theme.s1
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: convItem.modelData.title.length > 0
+                          ? convItem.modelData.title
+                          : qsTr("新对话")
+                    color: convItem.current ? Theme.text : Theme.textDim
+                    font.pixelSize: Theme.fSmall
+                    elide: Text.ElideRight
+                }
+
+                Item {
+                    id: delBtn
+                    anchors.right: parent.right
+                    anchors.rightMargin: Theme.s1
+                    anchors.verticalCenter: parent.verticalCenter
+                    width: 22
+                    height: 22
+                    visible: convHover.hovered
+
+                    Rectangle {
+                        anchors.fill: parent
+                        radius: Theme.rSm
+                        color: delHover.hovered ? Theme.dangerGhost : "transparent"
+                    }
+
+                    Text {
+                        anchors.centerIn: parent
+                        text: "\u2715"
+                        color: delHover.hovered ? Theme.danger : Theme.textFaint
+                        font.pixelSize: Theme.fSmall
+                    }
+
+                    HoverHandler { id: delHover }
+                    TapHandler { onTapped: History.removeConversation(convItem.modelData.id) }
+                }
+
+                HoverHandler { id: convHover }
+                TapHandler { onTapped: History.openConversation(convItem.modelData.id) }
+            }
+
+            Text {
+                anchors.centerIn: parent
+                visible: convList.count === 0
+                text: qsTr("暂无会话")
+                color: Theme.textGhost
+                font.pixelSize: Theme.fSmall
+            }
         }
     }
 
-    // ---------------------------------------------------------- 连接设置卡
+    // ============================================================ 连接设置卡
     MSurface {
         id: connCard
-        anchors.left: parent.left
+        anchors.left: convPanel.right
         anchors.right: parent.right
         anchors.top: parent.top
+        anchors.leftMargin: Theme.s4
         height: connCard.expanded ? 190 : 56
         clip: true
 
@@ -108,6 +233,13 @@ Item {
                     visible: !Chat.dataStoreAvailable
                     tone: "danger"
                     text: qsTr("本平台不支持加密存储")
+                    anchors.verticalCenter: parent.verticalCenter
+                }
+
+                MChip {
+                    visible: !History.available
+                    tone: "danger"
+                    text: qsTr("会话历史不可用")
                     anchors.verticalCenter: parent.verticalCenter
                 }
             }
@@ -256,9 +388,10 @@ Item {
     // ---------------------------------------------------------- 底部区
     Column {
         id: bottomArea
-        anchors.left: parent.left
+        anchors.left: convPanel.right
         anchors.right: parent.right
         anchors.bottom: parent.bottom
+        anchors.leftMargin: Theme.s4
         spacing: Theme.s3
 
         // 错误横幅：只在有错误时占位
@@ -266,10 +399,10 @@ Item {
             id: errorBanner
             width: parent.width
             height: 42
-            visible: Chat.lastError.length > 0
+            visible: page.errorText.length > 0
             radius: Theme.rMd
             fill: Theme.dangerGhost
-            stroke: "#3DE5605A"
+            stroke: Theme.dangerHair
 
             Row {
                 anchors.left: parent.left
@@ -287,7 +420,7 @@ Item {
 
                 Text {
                     width: parent.width - 60
-                    text: Chat.lastError
+                    text: page.errorText
                     color: Theme.danger
                     font.pixelSize: Theme.fSmall
                     elide: Text.ElideRight
@@ -384,8 +517,9 @@ Item {
     // ---------------------------------------------------------- 消息流
     ListView {
         id: transcriptView
-        anchors.left: parent.left
+        anchors.left: convPanel.right
         anchors.right: parent.right
+        anchors.leftMargin: Theme.s4
         anchors.top: connCard.bottom
         anchors.bottom: bottomArea.top
         anchors.topMargin: Theme.s4
@@ -393,7 +527,9 @@ Item {
         clip: true
         spacing: 0
         boundsBehavior: Flickable.StopAtBounds
-        model: transcript
+        model: History
+
+        onCountChanged: positionViewAtEnd()
 
         ScrollBar.vertical: ScrollBar {
             id: vScroll
@@ -411,21 +547,33 @@ Item {
 
         delegate: Item {
             id: wrapper
-
             required property string role
-            required property string text
+            required property string content
+            required property string status
+            required property int messageId
 
-            width: ListView.view.width
+            width: ListView.view ? ListView.view.width : 0
             height: bubble.height + Theme.s4
 
             readonly property bool isUser: wrapper.role === "user"
-            readonly property real maxWidth: Math.min(680, wrapper.width * 0.8)
+            readonly property bool thinking: wrapper.status === "streaming" && wrapper.content.length === 0
+            readonly property real maxWidth: page.bubbleMaxWidth
+
+            /// 流式时竖线呼吸
+            property real pulse: 1.0
+
+            SequentialAnimation on pulse {
+                running: wrapper.status === "streaming"
+                loops: Animation.Infinite
+                NumberAnimation { from: 1.0; to: 0.3; duration: 620; easing.type: Easing.InOutQuad }
+                NumberAnimation { from: 0.3; to: 1.0; duration: 620; easing.type: Easing.InOutQuad }
+            }
 
             // 用于测量单行自然宽度（自身不受宽度约束）
             Text {
                 id: measureText
                 visible: false
-                text: wrapper.text
+                text: wrapper.thinking ? qsTr("正在思考…") : wrapper.content
                 font.pixelSize: Theme.fBody
             }
 
@@ -442,11 +590,11 @@ Item {
                 anchors.left: wrapper.isUser ? undefined : parent.left
                 anchors.right: wrapper.isUser ? parent.right : undefined
                 radius: Theme.rLg
-                color: wrapper.isUser ? Theme.ink3 : "#0AFFFFFF"
+                color: wrapper.isUser ? Theme.ink3 : Theme.overlaySubtle
                 border.width: wrapper.isUser ? 1 : 0
                 border.color: Theme.hairline
 
-                // 助手侧：一道琥珀竖线，作为"AI 的声音"的视觉锚
+                // 助手侧：一道琥珀竖线，作为"AI 的声音"的视觉锚；流式时呼吸
                 Rectangle {
                     visible: !wrapper.isUser
                     anchors.left: parent.left
@@ -457,6 +605,7 @@ Item {
                     width: 2
                     radius: 1
                     color: Theme.accent
+                    opacity: wrapper.status === "streaming" ? wrapper.pulse : 1.0
                 }
 
                 MLabel {
@@ -466,7 +615,8 @@ Item {
                     anchors.leftMargin: bubble.hPad + bubble.railWidth
                     anchors.topMargin: bubble.vPad
                     label: wrapper.isUser ? qsTr("你") : qsTr("MeowAi")
-                    tone: wrapper.isUser ? Theme.textGhost : Theme.accent
+                    tone: wrapper.isUser ? Theme.textGhost
+                                         : (wrapper.status === "error" ? Theme.danger : Theme.accent)
                 }
 
                 Text {
@@ -477,85 +627,9 @@ Item {
                     anchors.leftMargin: bubble.hPad + bubble.railWidth
                     anchors.rightMargin: bubble.hPad
                     anchors.topMargin: 6
-                    text: wrapper.text
-                    color: Theme.text
-                    font.pixelSize: Theme.fBody
-                    lineHeight: 1.55
-                    wrapMode: Text.Wrap
-                }
-            }
-        }
-
-        // 流式气泡：本轮生成期间贴在末尾
-        footer: Item {
-            id: streamFooter
-            width: transcriptView.width
-            height: streamBubble.height + Theme.s4
-            visible: Chat.busy
-
-            property real pulse: 1.0
-
-            SequentialAnimation on pulse {
-                running: Chat.busy
-                loops: Animation.Infinite
-                NumberAnimation { from: 1.0; to: 0.3; duration: 620; easing.type: Easing.InOutQuad }
-                NumberAnimation { from: 0.3; to: 1.0; duration: 620; easing.type: Easing.InOutQuad }
-            }
-
-            Rectangle {
-                id: streamBubble
-                readonly property int hPad: 16
-                readonly property int vPad: 12
-                readonly property int railWidth: 10
-
-                width: Math.min(page.bubbleMaxWidth,
-                                Math.ceil(streamMeasure.implicitWidth) + streamBubble.hPad * 2
-                                + streamBubble.railWidth)
-                height: streamTag.implicitHeight + 6 + streamBody.implicitHeight + streamBubble.vPad * 2
-                anchors.top: parent.top
-                anchors.left: parent.left
-                radius: Theme.rLg
-                color: "#0AFFFFFF"
-
-                Rectangle {
-                    anchors.left: parent.left
-                    anchors.top: parent.top
-                    anchors.bottom: parent.bottom
-                    anchors.topMargin: 6
-                    anchors.bottomMargin: 6
-                    width: 2
-                    radius: 1
-                    color: Theme.accent
-                    opacity: streamFooter.pulse
-                }
-
-                MLabel {
-                    id: streamTag
-                    anchors.left: parent.left
-                    anchors.top: parent.top
-                    anchors.leftMargin: streamBubble.hPad + streamBubble.railWidth
-                    anchors.topMargin: streamBubble.vPad
-                    label: qsTr("MeowAi")
-                    tone: Theme.accent
-                }
-
-                Text {
-                    id: streamMeasure
-                    visible: false
-                    text: streamBody.text
-                    font.pixelSize: Theme.fBody
-                }
-
-                Text {
-                    id: streamBody
-                    anchors.left: parent.left
-                    anchors.right: parent.right
-                    anchors.top: streamTag.bottom
-                    anchors.leftMargin: streamBubble.hPad + streamBubble.railWidth
-                    anchors.rightMargin: streamBubble.hPad
-                    anchors.topMargin: 6
-                    text: Chat.replyText.length > 0 ? Chat.replyText : qsTr("正在思考…")
-                    color: Chat.replyText.length > 0 ? Theme.text : Theme.textFaint
+                    text: wrapper.thinking ? qsTr("正在思考…") : wrapper.content
+                    color: wrapper.thinking ? Theme.textFaint
+                                            : (wrapper.status === "error" ? Theme.danger : Theme.text)
                     font.pixelSize: Theme.fBody
                     lineHeight: 1.55
                     wrapMode: Text.Wrap
@@ -564,10 +638,25 @@ Item {
         }
     }
 
+    // 一轮结束：把视图贴到最新（用户消息由 core 落库入模型，无需在此追加）
+    Connections {
+        target: Chat
+
+        function onBusyChanged() {
+            transcriptView.positionViewAtEnd()
+        }
+
+        // 流式增量：保持视图贴底
+        function onReplyTextChanged() {
+            if (Chat.busy)
+                transcriptView.positionViewAtEnd()
+        }
+    }
+
     // 空态
     Item {
         anchors.fill: transcriptView
-        visible: transcript.count === 0 && !Chat.busy
+        visible: transcriptView.count === 0 && !Chat.busy
         enabled: false
 
         EyeMark {

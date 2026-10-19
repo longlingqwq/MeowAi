@@ -1,9 +1,14 @@
 #include "core/chat/ChatController.h"
 
+#include "core/chat/ChatHistoryModel.h"
 #include "providers/ProviderFactory.h"
 #include "storage/SecureStore.h"
 
 namespace {
+
+/// 有界上下文上限：条数与字符数双重限制，避免请求无限增长
+constexpr int kMaxHistoryMessages = 20;
+constexpr int kMaxHistoryChars = 8000;
 
 QString normalizedProviderId(const QString &providerId)
 {
@@ -24,9 +29,10 @@ QString defaultModelFor(const QString &providerId)
 
 }  // namespace
 
-ChatController::ChatController(SecureStore *store, QObject *parent)
+ChatController::ChatController(SecureStore *store, ChatHistoryModel *history, QObject *parent)
     : QObject(parent)
     , m_store(store)
+    , m_history(history)
 {
     setProvider(m_providerId);
 }
@@ -100,18 +106,29 @@ void ChatController::setProvider(const QString &providerId)
         connect(m_provider.get(), &AiProvider::chatDelta, this, [this](const QString &delta) {
             m_replyText += delta;
             emit replyTextChanged();
+            if (m_history && m_history->available())
+                m_history->appendAssistantDelta(delta);
         });
         connect(m_provider.get(), &AiProvider::chatFinished, this, [this](const ChatResponse &response) {
             if (!response.text.isEmpty()) {
                 m_replyText = response.text;
                 emit replyTextChanged();
             }
+            // 以整包文本对齐流式累积结果，避免分片丢失导致内容不一致
+            if (m_history && m_history->available())
+                m_history->finalizeAssistantMessage(QStringLiteral("complete"), m_replyText);
             setBusy(false);
         });
         connect(m_provider.get(), &AiProvider::chatFailed, this, [this](const ChatError &error) {
             // 取消属于预期操作：保留已接收内容，不视为错误
             if (error.code != ChatError::Cancelled)
                 setLastError(error.message);
+            // 中断/失败都**保留已生成的部分内容**，只标记状态，不写坏数据
+            if (m_history && m_history->available()) {
+                m_history->finalizeAssistantMessage(
+                    error.code == ChatError::Cancelled ? QStringLiteral("partial")
+                                                       : QStringLiteral("error"));
+            }
             setBusy(false);
         });
     }
@@ -158,11 +175,7 @@ void ChatController::send(const QString &text)
     ChatMessage message;
     message.role = ChatMessage::User;
     message.text = text;
-
-    ChatRequest request;
-    request.model = m_model;
-    request.messages.append(message);
-    sendRequest(request);
+    dispatchUserMessage(message);
 }
 
 void ChatController::sendWithImage(const QString &text, const QString &imagePath)
@@ -173,14 +186,10 @@ void ChatController::sendWithImage(const QString &text, const QString &imagePath
     ChatImage image;
     image.path = imagePath;
     message.images.append(image);
-
-    ChatRequest request;
-    request.model = m_model;
-    request.messages.append(message);
-    sendRequest(request);
+    dispatchUserMessage(message);
 }
 
-void ChatController::sendRequest(const ChatRequest &request)
+void ChatController::dispatchUserMessage(const ChatMessage &userMessage)
 {
     if (m_busy) {
         setLastError(QStringLiteral("上一条请求尚未结束"));
@@ -210,6 +219,33 @@ void ChatController::sendRequest(const ChatRequest &request)
     config.apiKey = apiKey;
     config.model = m_model;
     m_provider->configure(config);
+
+    ChatRequest request;
+    request.model = m_model;
+
+    if (m_history && m_history->available()) {
+        // 写入会话历史，再按**有界上下文**取回（含刚写入的这条用户消息）
+        m_history->appendUserMessage(userMessage.text);
+        m_history->beginAssistantMessage();
+        request.messages = m_history->requestHistory(kMaxHistoryMessages, kMaxHistoryChars);
+        // 图片不落库，仅在本次请求末尾补上（是否真正上传仍由 imagesConfirmed 决定）
+        if (!userMessage.images.isEmpty() && !request.messages.isEmpty()
+            && request.messages.last().role == ChatMessage::User) {
+            request.messages.last().images = userMessage.images;
+        }
+    } else {
+        request.messages.append(userMessage);
+    }
+
+    sendRequest(request);
+}
+
+void ChatController::sendRequest(const ChatRequest &request)
+{
+    if (!m_provider) {
+        setLastError(QStringLiteral("Provider 不可用"));
+        return;
+    }
 
     ChatRequest effective = request;
     effective.model = request.model.isEmpty() ? m_model : request.model;

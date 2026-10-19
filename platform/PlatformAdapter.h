@@ -27,6 +27,9 @@ public:
     /// 内置 Skill 目录（qrc 内嵌资源，形如 ":/skills"）
     virtual QString bundledSkillsRoot() const = 0;
 
+    /// 是否使用**无边框自绘标题栏**（阶段三）：桌面端 true，Android / Web 回退原生 chrome
+    virtual bool supportsCustomTitleBar() const = 0;
+
     /// 粗略的网络可达性判断；无法判定时返回 true，交由请求层处理错误
     virtual bool isNetworkAvailable() const = 0;
 
