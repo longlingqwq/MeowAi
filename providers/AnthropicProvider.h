@@ -7,6 +7,7 @@
 #include <QByteArray>
 #include <QJsonObject>
 #include <QString>
+#include <QStringList>
 
 /**
  * Anthropic Messages API 协议实现（真实网络请求，含 SSE 流式与多模态）。
@@ -28,6 +29,8 @@ public:
     void configure(const ProviderConfig &config) override;
     void sendChat(const ChatRequest &request) override;
     void cancel() override;
+    void validateCredentials() override;
+    void fetchModels() override;
 
 private:
     bool buildBody(const ChatRequest &request, QJsonObject *body, QString *error) const;
@@ -38,10 +41,20 @@ private:
     void fail(ChatError::Code code, int httpStatus, const QString &message);
     void abortActive();
 
+    /// 组装 Key 校验 / 模型清单请求所需的公共头部与地址
+    NetworkTransport::Request auxRequest(const QString &path, const QString &method) const;
+    void finishValidation(CredentialStatus status, const QString &message);
+    QStringList parseModelIds() const;
+
     ProviderConfig m_config;
     NetworkTransport *m_transport = nullptr;
 
     int m_handle = 0;
+    int m_validateHandle = 0;
+    int m_modelsHandle = 0;
+    QByteArray m_auxBody;
+    bool m_auxIsGet = false;
+
     bool m_streaming = true;
     SseStreamParser m_sse;
     QString m_accumulated;

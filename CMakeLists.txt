@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.21)
 
 project(MeowAi
-    VERSION 0.2.1
+    VERSION 0.2.4
     DESCRIPTION "MeowAi - 本地优先的 AI 助理客户端"
     LANGUAGES CXX
 )
@@ -26,6 +26,7 @@ option(MEOWAI_BUILD_TESTS "构建单元测试" ON)
 # ---------------------------------------------------------------------------
 add_library(MeowAiLib STATIC
     core/AppController.cpp
+    core/ai/ProviderCatalog.cpp
     core/chat/ChatController.cpp
     core/chat/ChatHistoryModel.cpp
     core/library/LibraryManager.cpp
@@ -36,6 +37,9 @@ add_library(MeowAiLib STATIC
     core/theme/ThemeManager.cpp
     core/theme/ThemePresetManager.cpp
     core/update/UpdateManager.cpp
+    core/web/HttpWebSearchProvider.cpp
+    core/web/WebSearchService.cpp
+    core/web/WebSearchTool.cpp
 
     providers/ProviderFactory.cpp
     providers/AiProvider.cpp
@@ -46,13 +50,18 @@ add_library(MeowAiLib STATIC
     providers/ProviderUtils.cpp
     providers/AiProvider.h        # 仅接口的头文件，需显式列出以触发 AUTOMOC
     providers/NetworkTransport.h  # 含 Q_OBJECT，需显式列出以触发 AUTOMOC
+    core/ai/ProviderCatalog.h     # 含 Q_OBJECT，需显式列出以触发 AUTOMOC
+    core/web/WebSearchProvider.h   # 含 Q_OBJECT，需显式列出以触发 AUTOMOC
+    core/web/WebSearchTool.h       # 含 Q_OBJECT，需显式列出以触发 AUTOMOC
 
     storage/AppPaths.cpp
+    storage/AiConfigStore.cpp
     storage/ChatStore.cpp
     storage/Database.cpp
     storage/PersonalizationStore.cpp
     storage/SecureStore.cpp
     storage/ThemeStore.cpp
+    storage/WebConfigStore.cpp
 
     platform/PlatformAdapterFactory.cpp
     platform/impl/DesktopPlatformAdapter.cpp
@@ -105,6 +114,8 @@ qt_add_qml_module(MeowAi
         ui/EyeMark.qml
         ui/MAvatar.qml
         ui/TitleBar.qml
+        ui/ModelMenu.qml
+        ui/WebSearchPanel.qml
         # 页面
         ui/ConversationPage.qml
         ui/PersonalizationPage.qml
@@ -128,6 +139,15 @@ qt_add_resources(MeowAi "themes"
     FILES
         resources/themes/theme1.json
         resources/themes/theme2.json
+)
+
+# 厂商 / 模型目录（v0.2.3 AI 接入增强）：运行期路径为 ":/providers/providers.json"。
+# core/ai/ProviderCatalog 只按路径读取，新增厂商＝新增一个 JSON 条目，零代码。
+qt_add_resources(MeowAi "providers"
+    PREFIX "/providers"
+    BASE resources
+    FILES
+        resources/providers.json
 )
 
 # 可执行程序是 QML 宿主：Multimedia 仅用于 QML 侧开屏视频播放（功能 #11），

@@ -6,6 +6,7 @@
 #include <memory>
 
 class AppPaths;
+class AiConfigStore;
 class ChatController;
 class ChatHistoryModel;
 class ChatStore;
@@ -13,12 +14,16 @@ class Database;
 class DocumentRetriever;
 class PlatformAdapter;
 class PersonalizationStore;
+class ProviderCatalog;
 class SecureStore;
 class SkillRegistry;
 class ThemeManager;
 class ThemePresetManager;
 class ThemeStore;
 class UpdateManager;
+class WebConfigStore;
+class WebSearchProvider;
+class WebSearchService;
 
 /**
  * 顶层门面（AppController）：
@@ -56,6 +61,8 @@ public:
     SecureStore *secureStore() const;
     /// 对话控制器（功能 #3 / #4）；初始化后可用，失败时为 nullptr
     ChatController *chatController() const;
+    /// 厂商 / 模型目录（v0.2.3）；只读内嵌资源，初始化后即可用（缺失时为 nullptr）
+    ProviderCatalog *providerCatalog() const;
     /// 会话历史模型（阶段三）；数据库不可用时仍可构造，只是不可持久化
     ChatHistoryModel *chatHistoryModel() const;
 
@@ -73,6 +80,12 @@ private:
     std::unique_ptr<PersonalizationStore> m_personalizationStore;
     std::unique_ptr<ThemeStore> m_themeStore;
     std::unique_ptr<SecureStore> m_secureStore;
+    std::unique_ptr<ProviderCatalog> m_providerCatalog;
+    std::unique_ptr<AiConfigStore> m_aiConfigStore;
+    /// 联网检索（v0.2.3 新模块）：配置段 web + HTTP 后端 + 编排服务
+    std::unique_ptr<WebConfigStore> m_webConfigStore;
+    std::unique_ptr<WebSearchProvider> m_webSearchProvider;
+    std::unique_ptr<WebSearchService> m_webSearch;
     std::unique_ptr<ChatStore> m_chatStore;
     std::unique_ptr<ChatHistoryModel> m_chatHistory;
     std::unique_ptr<ChatController> m_chat;

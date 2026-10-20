@@ -39,6 +39,126 @@
 
 ## 四、日志（按时间倒序，最新在最上）
 
+### 2026-10-20 ｜ v0.2.4 联网检索改造：B 形态（模型自主联网）+ DeepSeek 零配置 + UI 弱化 ｜ 状态：待验收
+- **阶段**：阶段二（AI 接入增强 · 联网检索改造）
+- **负责人**：开发 Agent（待补充）
+- **分支 / PR**：`v0.2.4`
+- **交付内容**（把 v0.2.3 的「A 形态·应用侧预检索」替换为「B 形态·模型自主按需联网」，并新增厂商内置源零配置）：
+  - **providers 层 · 工具调用（function calling）**：
+    - `providers/ChatTypes.h`：新增 `ChatToolCall{id,name,arguments}`；`ChatMessage::Role` 增 `Tool`，并新增 `toolCallId` / `toolCalls`；`ChatRequest` 增 `tools` / `toolChoice`；`ChatResponse` 增 `FinishReason` 枚举与 `toolCalls`。注册 `Q_DECLARE_METATYPE` 供信号跨线程 / `QSignalSpy` 使用。
+    - `providers/OpenAiProvider.{h,cpp}`：`buildBody` 支持 `role=tool`（`tool_call_id` + 文本）与 assistant 携带 `tool_calls` 透传；请求体按需注入 `tools` 与 `tool_choice`；`processStreamEvent` 按 `delta.tool_calls[].index` **拼接**（id/name 覆盖、arguments **追加**，兼容分片与缺省 index），并记录 `finish_reason`；`handleFinished` 流式 / 非流式均下发 `toolCalls`，`finishReason` 有工具调用即判 `ToolCalls`。
+  - **目录与配置（数据驱动，零硬编码）**：`resources/providers.json` 的 `deepseek` 条目新增 `nativeSearch{protocol:"deepseek", searchEndpoint:"…/v1/tools/search", fetchEndpoint:"…/v1/tools/fetch", reuseProviderKey:true}`；`core/ai/ProviderCatalog` 解析 `nativeSearch`（`protocol` 归一化小写；缺 `searchEndpoint` 或非 `http` 前缀 → **只记 warning 并忽略**，不使整条目录失效），`providerOptions()` 增 `nativeSearch` 布尔供 UI 判断；UI 依旧**不硬编码厂商**。
+  - **core/web · 双协议检索后端**：`WebSearchProvider.h` 的 `WebSearchConfig` 增 `enum class Protocol{Generic,DeepSeek}` 与 `fetchEndpoint`（**追加在原有成员之后**，保持既有聚合初始化兼容）。`HttpWebSearchProvider` 增 `isDeepSeek()` 与 `jsonRequest()`：DeepSeek 协议下搜索 `POST <searchEndpoint>` body `{"query","count"}`、抓取 `POST <fetchEndpoint>` body `{"url"}`，均带 `Content-Type: application/json` 与 `Authorization: Bearer <providerKey>`（**密钥只走请求头，不进 URL、不进日志 / 错误信息**）；`parseResults` 的摘要优先级补入 `summary`；`parseFetch` 增 DeepSeek 分支解析 `{title,content(Markdown)}` 并按 `maxFetchChars` 裁剪。`WebSearchService` 增 `configure(runtime)` / `clearRuntimeConfig()`：运行时方案就绪时**跳过自填端点和搜索密钥**，支撑「厂商内置源 · 复用厂商 Key」的零配置路径。
+  - **core/web · 工具封装**：新增 `WebSearchTool.{h,cpp}`，把一次「检索 + 抓取 + 拼接」包装成模型可调用的工具：`descriptor()` 给出 OpenAI function schema（`name=web_search`，`required=[query]`），`execute(query)` 异步执行并以 `finished(resultText, sources, error)` 回传；service 为空 / query 为空时**立即以 error 回传**不崩。
+  - **core/chat · B 形态工具循环**：`ChatController` 新增 `webSearchNative` / `webSearchSearching` 属性与 `effectiveSearchConfig()`（① 厂商 `nativeSearch` 有效 → `supported=true`、按 `deepseek` 映射协议、按 `reuseProviderKey` 决定取 `providerApiKeyId` 还是 `webSearchApiKeyId`；② 无内置但有自填端点 → Generic 自定义源；③ 否则给出中文 notice「当前厂商暂不支持智能联网…」）。开启联网且工具就绪时：下发 `web_search` 工具并进入**工具调用循环**（`tool_choice=auto`，模型需要时才上网），循环上限 **3 轮**（`kMaxToolRounds`），未命中 / 未知工具 / 缺参 / 检索失败均**容错继续让模型收敛**，多轮来源**累加**；不支持 / 未就绪时**降级为普通对话 + 明确提示**，不崩不清空；`cancel()` 在检索中或生成中均清空循环标志。
+  - **UI 重构（按用户要求「弱化网络端子」）**：`ui/ConversationPage.qml` 删除接入卡内联网端点 / 密钥配置行，在输入条新增「智能联网」pill（点击即 `Chat.webSearchEnabled` 取反），「当前选择条」新增联网状态 chip（正在联网搜索… / 智能联网 / 联网未就绪）；联网第二次配置入口下移到 `ui/ModelMenu.qml` 的「联网搜索」入口行 → 新增第三级弹层 `ui/WebSearchPanel.qml`（总开关 + 内置源说明 / 自定义源端点与密钥）。**QML 只调 `Chat`，不碰网络与密钥明文**。
+  - **tests**：新增 `tests/tst_toolcall.cpp`（8 项：请求体含 `tools`、流式 `tool_calls` 拼接、非流式解析、`WebSearchTool` schema + 执行、正常回答不检索、检索后作答、**3 轮上限停止**、厂商不支持时降级）；`tests/tst_websearch.cpp` 增 4 项（DeepSeek 搜索 `POST` JSON、DeepSeek 抓取 `POST` JSON + Markdown 裁剪、缺 `fetchEndpoint` 拒绝、**运行时方案零配置端到端**）；`tests/tst_providercatalog.cpp` 增 `nativeSearch` 解析（合法声明解析 + 非法声明被忽略且只记 warning）与内置目录自检断言。
+- **自测**：本地 Debug 构建通过（含新增 `tst_toolcall` 目标）；`ctest -C Debug` **13/13** 通过；`MeowAi.exe --smoke-test` 退出码 **0**；运行期 QML 警告 **0**。
+- **遗留 / 待定**：**Anthropic 本轮不支持智能联网**（提示「暂不支持」并降级为普通对话），如需支持另行评审；真实 DeepSeek 内置检索为联网手测项，待用户自备 Key 验证；**按要求暂不提交 git**，待用户提供远端信息后补 PR。
+- **出处**：
+  - DeepSeek 内置搜索 / 抓取 API（`POST /v1/tools/search` body `{"query","count"}` → `{"results":[{title,url,snippet,summary,content,…}]}`；`POST /v1/tools/fetch` body `{"url"}` → `{"title","content"(Markdown)}`；鉴权复用同一 API Key）：https://api-docs.deepseek.com/zh-cn/guides/search
+  - OpenAI 兼容工具调用协议（`tools` / `tool_choice` / `tool_calls` / `role=tool` / `finish_reason=tool_calls`，流式按 `index` 分片拼接）：https://platform.openai.com/docs/guides/function-calling
+  - 深研结论：**工具调用循环位于 core 层**（`providers` 保持「单次请求 → 信号」不反向依赖），符合「UI → core → {providers,storage} → platform」分层硬约束。
+
+### 2026-10-20 ｜ v0.2.3 新模块：联网检索（search / fetch）｜ 状态：待验收
+- **阶段**：阶段二（AI 接入增强 · 独立新模块）
+- **负责人**：开发 Agent（待补充）
+- **分支 / PR**：`v0.2.3`
+- **交付内容**（**严格边界隔离**：只新增 `core/web/` + `storage/WebConfigStore`，不改动既有 Provider 与资料库接口）：
+  - **`core/web/WebSearchProvider.h`**：联网检索纯接口 + 公共类型 `WebSearchResult{title,url,snippet}` / `WebFetchResult{url,title,text}` / `WebSearchConfig{endpoint,apiKey,timeoutMs,maxFetchChars}`。**与 `core/retriever/DocumentRetriever` 刻意分开**（前者面向公网、后者面向本地资料库），二者不共用类型与实现，避免职责杂糅。
+  - **`core/web/HttpWebSearchProvider.{h,cpp}`**：自填端点 + URL 直连抓取，**不依赖任何第三方搜索 SDK**。搜索走 `GET <endpoint>`（支持 `{query}` 占位符，无占位符则自动追加 `?q=`），容错解析常见 JSON 结构（`results` / `data` / `items` / `hits` / 嵌套 `web.results`，字段名兼容 `title|name|heading`、`url|link|href|uri|permalink`、`snippet|description|content|summary|text|body`）；抓取 `GET <url>`，剥离 `<script>`/`<style>`、去标签、解码常见实体、折叠空白并按 `maxFetchChars` 裁剪正文。响应体累积上限 512KB 防超大页面。网络**一律经 `providers/NetworkTransport` 抽象**发出（core → providers 方向合法；生产自建 `QNetworkTransport`，单测注入假实现）。
+  - **`core/web/WebSearchService.{h,cpp}`**：一次 `run()` 编排「检索 → 抓取前 2 条正文 → 拼成可注入上下文（标题 + 链接 + 摘要 + 正文）」，**单页抓取失败只跳过该页、整体不中断**。
+  - **`storage/WebConfigStore.{h,cpp}`**：只读写 `config.json` 的 `web` 段（`enabled` / `endpoint`），**模式对标 `AiConfigStore`**（读现有 JSON → 只替换本段 → `QSaveFile` 原子写；损坏文件以空对象重建），其他段（ai / theme / personalization）一律保留不动；**绝不保存密钥**。
+  - **`storage/SecureStore`**：新增固定键名 `web.search.api_key`（`webSearchApiKeyId()`），搜索密钥**只走保险库、绝不明文落盘**；`Authorization: Bearer <key>` 只随请求头下发、**不进 URL**，日志与错误信息不含密钥。
+  - **A 形态接入（应用侧预检索）**：`core/chat/ChatController` 新增 `webSearchEnabled` 开关与端点 / 密钥的 QML 门面；开关打开时在 `dispatchUserMessage()` 中**先检索**，把资料作为一条 system 消息插在「当前时间」注入之后（**同样不入库**）再发送；**未配置（端点或密钥缺失）/ 401 / 403 / 429 / 超时 / 断网 / 网页不可抓**一律**降级为普通对话 + 中文明确提示**，不崩、不清空；检索阶段点「中断」整轮作废并丢弃迟到结果。
+  - **`core/AppController`**：装配 `WebConfigStore` + `HttpWebSearchProvider` + `WebSearchService` 并注入 `ChatController`。
+  - **`ui/ConversationPage.qml`**：接入卡新增「联网」开关、搜索端点输入、搜索密钥保存 / 清除、就绪状态 chip 与配置提示；底部新增「已联网 · N 条来源」与来源标题 chip。**QML 只调 `Chat`，不碰网络与密钥明文**。
+  - **`tests/tst_websearch.cpp`**（18 项，全离线）：配置往返 + 其他段保留 + 损坏回退；`{query}` 占位符与自动追加 `?q=`；密钥走 Bearer 头且**绝不进 URL**；空端点拒发请求；JSON 两种结构解析 + 无 url 条目丢弃 + topK 生效；非 JSON 响应明确报错；**401 / 403 / 429 / 500 / 超时 / 断网**分类提示且不崩；抓取标题 / 正文抽取 + 脚本样式剥离 + 上限裁剪；非 http 地址拒绝；**取消静默**；服务缺端点 / 缺密钥的状态说明；**端到端编排**（检索 → 抓 2 条 → 第 2 条超时仍成上下文）。
+- **自测**：Debug 构建通过（无编译告警）；`ctest -C Debug` **12/12** 通过；`tst_websearch` 单跑 **18 passed / 0 failed / 0 skipped**。
+- **接口偏差说明（如实记录）**：最初草案曾设想阻塞式 `search(query, topK, error)`。因架构硬约束「网络只经 `providers/NetworkTransport` 抽象」而该抽象本身即异步（无阻塞 API），阻塞实现只能靠嵌套事件循环，会**卡住 UI 线程且易重入**；故最终接口改为**异步 + 信号**（`searchFinished` / `fetchFinished`），语义与既有 `AiProvider` 一致。行为与 DoD 完全一致，仅调用形态变化。
+- **出处**：
+  - HTTP 语义（GET / `Authorization` 请求头字段）：RFC 9110 — https://www.rfc-editor.org/rfc/rfc9110
+  - Qt 网络（`QNetworkAccessManager` / `QNetworkRequest` / 超时与错误分类）：https://doc.qt.io/qt-6/qnetworkaccessmanager.html
+  - JSON 搜索结果结构参考（`{"results":[…]}` 是自建/自托管搜索端点的最常见形态）：SearXNG 搜索 API — https://docs.searxng.org/dev/search_api.html
+- **遗留 / 待定**：**B 形态（模型自主工具调用 search/fetch）未实现**（按既定决策 A 先行）；真实端点手测需用户自备端点与密钥，待人工验证；厂商级「原生联网」能力未接入（本项目统一走应用侧预检索）。
+
+### 2026-10-20 ｜ v0.2.3 补丁：DeepSeek 视觉标记修正 + 当前时间注入 ｜ 状态：待验收
+- **阶段**：阶段二（AI 接入增强 · 补丁）
+- **负责人**：开发 Agent（待补充）
+- **分支 / PR**：`v0.2.3`
+- **交付内容**：
+  - **修正数据错误**：`resources/providers.json` 中 `deepseek-flash` 的 `supportsVision` 由 `false` 改为 `true`。依据 DeepSeek 官方文档 `https://api-docs.deepseek.com/quick_start/pricing` —— **deepseek-flash（DeepSeek-V4.1-Flash）Vision ✓ 支持**，而 `deepseek-v4-pro` 官方标注 **Not supported**（保持 `false`）。此前误标导致「DeepSeek Flash 的附图入口被禁用」。
+  - **新增 · 当前时间注入**：`core/chat/ChatController.cpp` 在每轮请求组装 `messages` 时**置顶插入**一条 system 消息「当前时间：yyyy-MM-dd HH:mm dddd（UTC±HH:MM）」，**不进会话历史、不入库**，每轮现算；**Provider 层零改动**（OpenAI 走 `role=system` 消息、Anthropic 走顶层 `system` 字段，两者既有实现已支持）。
+- **自测**：Debug 构建通过；`ctest -C Debug` **11/11** 通过；重新启动正常。附带修复的验证：选 DeepSeek Flash → 附图入口由禁用转为启用。
+- **遗留 / 待定**：时间注入**只让模型「知道当前时间」，不等于联网**；联网搜索（search / fetch）经核查项目**当前完全未实现**（现有 `SkillRegistry` 仅扫描示例技能、`DocumentRetriever`/`NullRetriever` 为空占位、`fetchModels` 是「拉取厂商模型清单」与联网无关），作为**独立新模块**另行出方案评审。
+
+### 2026-10-20 ｜ 阶段二收尾：AI 接入增强（多厂商 + 自定义 + 思考档位 + Key 校验）｜ 状态：待验收
+- **阶段**：阶段二（AI 接入增强 · 功能 #3 / #4）
+- **负责人**：开发 Agent（待补充）
+- **分支 / PR**：`v0.2.3`（PR 待创建；仓库远端待配置）—— 口径统一为 **v0.2.3**（上一批为 v0.2.1）
+- **交付内容**（四层，数据驱动，未重写既有实现）：
+
+  **① 数据层 · 厂商/模型目录**
+  - 新增 `resources/providers.json`（PREFIX `/providers`，运行期 `:/providers/providers.json`），**内置 7 家**：`openai / deepseek / qwen（通义千问）/ kimi（月之暗面）/ zhipu（智谱 GLM）/ anthropic / custom`。**明确不接入豆包 / 火山方舟（Ark）**。
+  - 每条厂商形如 `{id, displayName, protocol, baseUrl, authStyle, extraHeaders, validation:{method}, models:[...]}`，模型含 `supportsVision` / `isDefault` / `thinkingSpec.{levels, native}`。
+  - `protocol` 是多厂商关键：绝大多数厂商为 **OpenAI 兼容**，**复用既有 `OpenAiProvider`，仅切换 baseUrl / authStyle / extraHeaders**；**不为每个厂商写一套 Provider**。
+  - 新增 `core/ai/ProviderCatalog`：`providerOptions()` / `modelOptions(pid)` / `modelInfo(pid,mid)`，**未知 providerId 退化为 `custom` 条目**；新增 `tests/tst_providercatalog`（10 项）。
+  - 新增厂商 / 模型 = **改 JSON 即可，零 UI / 核心代码改动**。
+
+  **② Provider 层 · 鉴权 / 参数 / 校验**
+  - `providers/ChatTypes.h`：`ChatRequest` 增 `thinkingLevel` + `nativeParams`；新增 `enum class CredentialStatus{Unknown,NotConfigured,Valid,Invalid,Unverifiable}`；`ProviderConfig` 增 `providerId / authStyle / validationMethod / extraHeaders`。
+  - `providers/ProviderUtils`：新增 `endpointUrl`（query-key 时追加 `?key=`）、`authHeaders`（bearer→`Authorization: Bearer`；x-api-key→`x-api-key`；query-key→无头）、`requestHeaders`（`extraHeaders` **只补充不覆盖**）、`mergeNativeParams`（合并时**跳过保留字段** `model/messages/stream/system`）、`credentialStatusForHttp`（2xx→Valid；401/403→Invalid；429/超时/断网/5xx→Unverifiable）。
+  - `providers/NetworkTransport`：新增 `get()`（与 `post()` 共用私有 `send()`，按 method 选 GET/POST）。
+  - `providers/AiProvider`：新增纯虚 `validateCredentials()` / `fetchModels()` 与信号 `credentialsChecked` / `modelsFetched`。
+  - `OpenAiProvider`：`validateCredentials()`——`validation.method=="models"` 走 `GET /models`，否则发 **chat-minimal 最小请求**（`max_tokens:1`、`stream:false`、单条 "ping"）；`fetchModels()` 解析 `{"data":[{"id":...}]}`，**失败保留内置清单、不报错不清空**；`buildBody` 末尾注入 nativeParams。
+  - `AnthropicProvider`：同上；鉴权头 `x-api-key` + `anthropic-version` 兜底；思考用 `adaptive` / `disabled`（**不使用 budget_tokens**）。
+  - **三态语义严守**：**429 / 超时 / 断网 → `无法验证(Unverifiable)`，绝不误判为「Key 无效」**。
+
+  **③ core / storage · 选择与持久化**
+  - 新增 `storage/AiConfigStore`：只读写 `config.json` 的 `ai` 段（`providerId / modelId / customBaseUrl / thinkingLevels / nativeOverrides`），读改写回**保留其他模块的键**，`QSaveFile` 原子写，损坏 JSON 以空对象重建；**旧键平滑迁移**（`model.provider` / `model.name`）。
+  - `core/chat/ChatController` 重写为**数据驱动 + 视图接口**：`providerOptions()/modelOptions()/modelInfo()/effectiveParams()/advancedParams()`、`setProvider/setModelId/setThinkingLevel/setCustomBaseUrl/setAdvancedParams/clearAdvancedParams`、`saveApiKey/eraseApiKey/validateApiKey/fetchModelList`、`send/sendWithImage/cancel`；`credentialStatus` 输出 `unknown/notConfigured/valid/invalid/unverifiable` 字符串供 QML 直接比较。
+  - 默认思考档位取该模型 `levels` 最高档；`setThinkingLevel` 会清掉该选择键的高级覆盖（语义唯一）；`effectiveParams()` **高级覆盖优先于档位映射**。
+  - **自定义厂商门槛**：`customizable() && (customBaseUrl 为空 || modelId 为空)` 时 `dispatchUserMessage()` / `validateApiKey()` **拒绝并给中文错误**，避免打到空地址。
+  - `core/AppController`：装配 `ProviderCatalog` + `AiConfigStore` 并注入 `ChatController`；状态栏追加「厂商 N 家」。
+  - 新增 `tests/tst_aiconfigstore`（8 项，含旧配置迁移 / 损坏 JSON / 原子写不覆盖他段）。
+
+  **④ UI 层 · 接入卡 + 二级菜单（修复 bug）**
+  - **修复核心 bug**：此前 `ui/ConversationPage.qml` **硬编码** `model: ["openai","anthropic"]`，故下拉只两家、且「Anthropic」宽度不足被截成「An」。现改为 **完全由 `Chat.providerOptions()` / `Chat.modelOptions()` 驱动**，7 家厂商全名正常显示（下拉宽度 176）。
+  - 接入卡改造：**厂商下拉 → 模型下拉 → Key 输入 + 保存 / 清除 / 验证 + 三态 chip**；`custom` 时露出**手填 API 链接 / 模型名**两行。
+  - 新增 `ui/ModelMenu.qml`（Popup 二级菜单，已登记 CMakeLists）：**悬停约 1s（Timer）/ 单击 / 长按** 三种入口（Android 触屏无 hover，必须有回退）；行内**档位胶囊**点击 = 选模型 + 设档位；底部「高级原生参数」区（JSON TextArea + 重置 / 应用 + 「当前生效」chip + 解析错误提示）。
+  - 底部「当前」条：`modelPill`（HoverHandler + 1s Timer + TapHandler `onTapped`/`onLongPressed`）显示模型 / 档位 / 视觉 / 高级参数摘要。
+  - **图片入口按 `Chat.supportsVision` 启停**，不支持时显示「该模型未声明视觉能力，附图入口已关闭」；`submit()` 仅在 `supportsVision` 时走 `sendWithImage`。
+  - 接入卡高度自适应展开；**QML 只调 `Chat` 的 Q_INVOKABLE，不解析 JSON / 不碰网络 / 不碰密钥 / 不碰存储**。
+
+- **自测**：本地 Debug 构建通过；`ctest -C Debug` **11/11 全部通过**（含新增 `tst_providercatalog` 10 项、`tst_aiconfigstore` 8 项、`tst_provider` 扩展至 31 项：自定义 baseUrl+Bearer、逐厂商鉴权头、Anthropic 兜底头、nativeParams 注入不覆盖核心字段、Valid/Invalid/429/超时/断网/NotConfigured/chat-minimal 三态、清单解析、不支持厂商拒绝）；`MeowAi.exe --smoke-test` 退出码 0；**运行期 QML 警告 / 错误数为 0**（用 `QT_LOGGING_RULES` 正控制证明 stderr 管道有效后，实测空输出）。
+- **官方文档出处（硬性，逐一核对）**：
+  - OpenAI：`https://platform.openai.com/docs/api-reference/introduction`（baseUrl `/v1` 与 Bearer）、`https://platform.openai.com/docs/api-reference/models`（`GET /models` 清单）、`https://openai.com/index/introducing-gpt-5-for-developers` + `https://openai.com/index/o1-and-new-tools-for-developers`（`reasoning_effort`）
+  - DeepSeek：`https://api-docs.deepseek.com/`（baseUrl、Bearer）、`https://api-docs.deepseek.com/api/list-models`（`/models`）、`https://api-docs.deepseek.com/guides/thinking_mode`（思考开关）
+  - Kimi（月之暗面）：`https://platform.kimi.com/docs/api/chat`、`https://platform.kimi.com/docs/api/list-models`（`/models`、baseUrl `api.moonshot.cn/v1`）、`https://platform.kimi.com/docs/models`
+  - 通义千问（阿里云百炼）：`https://help.aliyun.com/zh/model-studio/base-url`、`https://help.aliyun.com/zh/model-studio/qwen-api-via-openai-chat-completions`（OpenAI 兼容 baseUrl、`enable_thinking`）、`https://help.aliyun.com/zh/model-studio/deep-thinking`、`https://help.aliyun.com/zh/model-studio/models`
+  - 智谱 GLM：`https://docs.bigmodel.cn/cn/api/introduction`（baseUrl `open.bigmodel.cn/api/paas/v4`、Bearer）、`https://docs.bigmodel.cn/cn/guide/capabilities/thinking`（`thinking.type`）、`https://docs.bigmodel.cn/cn/guide/start/model-overview`
+  - Anthropic：`https://platform.claude.com/docs/en/api/models/list`（`GET /v1/models`）、`https://platform.claude.com/docs/en/build-with-claude/extended-thinking`（`thinking.type` = `enabled|disabled|adaptive`）、`https://platform.claude.com/docs/en/api/versioning`（`anthropic-version: 2023-06-01`）
+- **遗留 / 待定**：
+  - 真实各家联网对话与「图片输入」需有效 Key 手测（DoD 第 3 条，待人工验证）。
+  - **模型清单为内置精选**（版本号按当前口径拟写：`gpt-5/4o`、`deepseek-v4-pro/flash`、`qwen3.8-max/plus/flash/vl-plus`、`kimi-k3/k2.6`、`glm-5.3/4.6/4.5-air/4.6v`、`claude-opus-5-5/sonnet-5/haiku-4.5`）——厂商发新版本时**改 `providers.json` 即可**；已提供「从厂商接口动态拉取」按钮（仅 `validation.method=="models"` 的厂商启用）。
+  - 仓库未配置 GitHub 远端，`v0.2.3` PR 待补。
+- **备注**：Key 仍**只**存 `SecureStore` 的 `provider.<id>.api_key`；错误信息 / 日志**不得含 Key 或完整请求体**；厂商 / 模型等非敏感选择只落 `config.json` 的 `ai` 段。版本口径统一为 **v0.2.3**。
+
+### 2026-10-20 ｜ 总代理验收：会话历史模型 / 主题系统 / 无边框标题栏 ｜ 状态：已验收（初步）
+- **阶段**：阶段二（收尾）——注：此前条目把这三个模块标为"阶段三"，**按当前口径归回阶段二收尾**。
+- **负责人**：总代理（审查与验收，不写代码）
+- **分支 / PR**：`v0.2.1`（PR 待创建）
+- **交付内容**：对模块 ①②③ 做初步验收（看实现与证据，未逐行深审），**结论：通过**。
+  - ① **会话历史**：`core/chat/ChatHistoryModel`（`QAbstractListModel`）+ `storage/ChatStore` **复用既有 SQLite `Database`**（未新建存储机制）；schema v1 建 `conversations` / `messages` / `message_attachments` 并为资料库预留位；流式 delta 节流落库、终局 finalize；`reload()` 将中断的 streaming 消息降级为 partial。`tests/tst_chatstore` 覆盖 schema / CRUD / **重启后保留** / 中断降级 / DB 不可用降级 / 有界上下文 → 证据充分。
+  - ② **主题系统**：`ui/Theme.qml` 令牌已由 `readonly` 改为**可变**，由 `ThemePresetManager` 以 `setProperty` 动态驱动；预设为数据文件 `resources/themes/theme1.json`（**主题1 = Nocturne 琥珀 = 当前配色 = 默认**）；选择持久化于 `config.json` 的 `theme.preset`；个性化页可列出并切换预设。
+  - ③ **标题栏**：`supportsCustomTitleBar()` Desktop=true / Android=Web=false；`TitleBarHelper.cpp` 以 `#if defined(Q_OS_WIN)` 隔离，处理 `WM_NCHITTEST` / `WM_NCCALCSIZE` / `WM_GETMINMAXINFO`，非 Windows 返回 `nullptr`；`ui/main.qml` 按能力切 `FramelessWindowHint` 且带 `resizeFrame` 兜底。另修复 `WIN32_EXECUTABLE TRUE`，消除多余控制台窗口。
+- **自测**：抽查证据如上；`--smoke-test` 支持存在。
+- **遗留 / 待定**：
+  - **组件硬编码颜色需抽查确认**（重点 `ui/MButton.qml` 等），否则换主题会漏色。
+  - Android Keystore 未真机验证（留阶段四）。
+  - **版本号口径不一致**：DEVLOG 记 `v0.2.1`、阶段三提示词曾建议 `v0.3.0`，建议**统一为 `v0.2.1`**（按"仍属阶段二"口径）。
+- **备注**：**PR 尚未创建，DoD 第 3 条（PR 可见 diff）未满足**；补 PR 后本条可转"正式验收"。
+
 ### 2026-10-19 ｜ 无边框自绘标题栏（阶段三·模块③）｜ 状态：待验收
 - **阶段**：阶段三（会话历史模型 + 主题系统 + 无边框标题栏）
 - **负责人**：开发 Agent（待补充）

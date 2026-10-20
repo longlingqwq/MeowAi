@@ -16,7 +16,18 @@ public:
 
     int post(const Request &request) override
     {
-        m_requests.append(request);
+        Request recorded = request;
+        recorded.method = QStringLiteral("POST");
+        m_requests.append(recorded);
+        m_lastHandle = ++m_handleCounter;
+        return m_lastHandle;
+    }
+
+    int get(const Request &request) override
+    {
+        Request recorded = request;
+        recorded.method = QStringLiteral("GET");
+        m_requests.append(recorded);
         m_lastHandle = ++m_handleCounter;
         return m_lastHandle;
     }

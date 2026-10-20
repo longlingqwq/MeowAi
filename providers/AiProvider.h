@@ -3,6 +3,7 @@
 #include "providers/ChatTypes.h"
 
 #include <QObject>
+#include <QStringList>
 
 /**
  * AI 接入抽象接口（功能 #3 / #4）。
@@ -35,8 +36,27 @@ public:
     /// 取消进行中的请求；无请求时为空操作。**必须真正中断在途网络请求**
     virtual void cancel() = 0;
 
+    /**
+     * 异步校验 API Key 有效性（**手动触发，不自动轮询**）。
+     * 请求一律经 NetworkTransport 发出，便于注入假实现离线单测。
+     * 结果通过 credentialsChecked 回传，语义遵循 CredentialStatus 三态：
+     * 2xx → Valid；401/403 → Invalid；429 / 超时 / 断网 / 5xx → Unverifiable。
+     */
+    virtual void validateCredentials() = 0;
+
+    /**
+     * 异步拉取厂商模型清单（仅 validation.method == "models" 的厂商有实现）。
+     * **失败不得视为致命错误**：结果通过 modelsFetched 回传，失败时 error 非空、列表为空，
+     * 由上层保留内置精选清单。
+     */
+    virtual void fetchModels() = 0;
+
 signals:
     void chatDelta(const QString &delta);             ///< 流式分片（增量文本）
     void chatFinished(const ChatResponse &response);  ///< 完整结果（成功）
     void chatFailed(const ChatError &error);          ///< 结构化失败原因
+    /// Key 校验结果；message 为面向用户的说明（已脱敏），可为空
+    void credentialsChecked(CredentialStatus status, const QString &message);
+    /// 动态模型清单；失败时 modelIds 为空、error 非空
+    void modelsFetched(const QStringList &modelIds, const QString &error);
 };

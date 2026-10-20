@@ -31,6 +31,37 @@ QString errorText(const QJsonObject &object)
     return message;
 }
 
+/// 校验请求的失败分类 → 三态结论（**限流 / 断网一律不得判成「无效」**）
+CredentialStatus statusForFailure(int httpStatus, NetworkTransport::Failure failure)
+{
+    switch (failure) {
+    case NetworkTransport::Failure::Timeout:
+    case NetworkTransport::Failure::NetworkUnavailable:
+        return CredentialStatus::Unverifiable;
+    case NetworkTransport::Failure::Cancelled:
+        return CredentialStatus::Unknown;
+    case NetworkTransport::Failure::Other:
+        break;
+    }
+    return ProviderUtils::credentialStatusForHttp(httpStatus);
+}
+
+/// Anthropic 请求头：默认 x-api-key 鉴权，且**必须**携带 anthropic-version（缺失时兜底）
+QList<QPair<QString, QString>> anthropicHeaders(const ProviderConfig &config, bool stream)
+{
+    ProviderConfig effective = config;
+    if (effective.authStyle.trimmed().isEmpty())
+        effective.authStyle = QStringLiteral("x-api-key");
+
+    QList<QPair<QString, QString>> headers = ProviderUtils::requestHeaders(effective, stream);
+    for (const auto &header : headers) {
+        if (header.first.compare(QStringLiteral("anthropic-version"), Qt::CaseInsensitive) == 0)
+            return headers;
+    }
+    headers.append({QStringLiteral("anthropic-version"), QStringLiteral("2023-06-01")});
+    return headers;
+}
+
 }  // namespace
 
 AnthropicProvider::AnthropicProvider(NetworkTransport *transport, QObject *parent)
@@ -125,6 +156,8 @@ bool AnthropicProvider::buildBody(const ChatRequest &request, QJsonObject *body,
     body->insert(QStringLiteral("max_tokens"), request.maxTokens > 0 ? request.maxTokens : 1024);
     body->insert(QStringLiteral("temperature"), request.temperature);
     body->insert(QStringLiteral("stream"), request.stream);
+    // 思考档位 / 高级原生参数：thinking 为 Anthropic 顶层字段，直接透传（不覆盖核心字段）
+    ProviderUtils::mergeNativeParams(body, request.nativeParams);
     return true;
 }
 
@@ -158,21 +191,109 @@ void AnthropicProvider::sendChat(const ChatRequest &request)
     m_sse.reset();
 
     NetworkTransport::Request transportRequest;
-    transportRequest.url = ProviderUtils::resolveBaseUrl(m_config, Protocol::Anthropic)
-                           + QStringLiteral("/messages");
-    transportRequest.headers = {
-        {QStringLiteral("Content-Type"), QStringLiteral("application/json")},
-        {QStringLiteral("Accept"), m_streaming ? QStringLiteral("text/event-stream")
-                                               : QStringLiteral("application/json")},
-        {QStringLiteral("x-api-key"), m_config.apiKey},
-        {QStringLiteral("anthropic-version"), QStringLiteral("2023-06-01")},
-    };
+    transportRequest.url = ProviderUtils::endpointUrl(m_config, Protocol::Anthropic,
+                                                      QStringLiteral("/messages"));
+    transportRequest.headers = anthropicHeaders(m_config, m_streaming);
     transportRequest.body = QJsonDocument(body).toJson(QJsonDocument::Compact);
     transportRequest.timeoutMs = 60000;
 
     m_handle = m_transport->post(transportRequest);
     if (m_handle == 0)
         fail(ChatError::Unknown, 0, QStringLiteral("无法发起网络请求"));
+}
+
+NetworkTransport::Request AnthropicProvider::auxRequest(const QString &path,
+                                                        const QString &method) const
+{
+    NetworkTransport::Request request;
+    request.url = ProviderUtils::endpointUrl(m_config, Protocol::Anthropic, path);
+    request.method = method;
+    request.headers = anthropicHeaders(m_config, false);
+    request.timeoutMs = 20000;
+    return request;
+}
+
+void AnthropicProvider::validateCredentials()
+{
+    if (!isConfigured()) {
+        finishValidation(CredentialStatus::NotConfigured, QStringLiteral("未配置 API Key"));
+        return;
+    }
+    if (m_validateHandle != 0) {
+        m_transport->abort(m_validateHandle);
+        m_validateHandle = 0;
+    }
+
+    m_auxBody.clear();
+    // Anthropic 官方提供 `GET /v1/models`，优先使用；catalog 未声明时回退最小对话请求
+    if (m_config.validationMethod == QStringLiteral("models")) {
+        m_auxIsGet = true;
+        m_validateHandle = m_transport->get(auxRequest(QStringLiteral("/models"), QStringLiteral("GET")));
+    } else {
+        m_auxIsGet = false;
+        QJsonObject body;
+        body.insert(QStringLiteral("model"), m_config.model);
+        body.insert(QStringLiteral("max_tokens"), 1);
+        body.insert(QStringLiteral("stream"), false);
+        QJsonArray messages;
+        QJsonObject message;
+        message.insert(QStringLiteral("role"), QStringLiteral("user"));
+        message.insert(QStringLiteral("content"), QStringLiteral("ping"));
+        messages.append(message);
+        body.insert(QStringLiteral("messages"), messages);
+
+        NetworkTransport::Request request =
+            auxRequest(QStringLiteral("/messages"), QStringLiteral("POST"));
+        request.body = QJsonDocument(body).toJson(QJsonDocument::Compact);
+        m_validateHandle = m_transport->post(request);
+    }
+
+    if (m_validateHandle == 0)
+        finishValidation(CredentialStatus::Unverifiable, QStringLiteral("无法发起校验请求"));
+}
+
+void AnthropicProvider::fetchModels()
+{
+    if (m_config.validationMethod != QStringLiteral("models")) {
+        emit modelsFetched(QStringList(), QStringLiteral("该厂商不支持动态拉取模型清单"));
+        return;
+    }
+    if (!isConfigured()) {
+        emit modelsFetched(QStringList(), QStringLiteral("未配置 API Key"));
+        return;
+    }
+    if (m_modelsHandle != 0) {
+        m_transport->abort(m_modelsHandle);
+        m_modelsHandle = 0;
+    }
+
+    m_auxBody.clear();
+    m_modelsHandle = m_transport->get(auxRequest(QStringLiteral("/models"), QStringLiteral("GET")));
+    if (m_modelsHandle == 0)
+        emit modelsFetched(QStringList(), QStringLiteral("无法发起拉取请求"));
+}
+
+void AnthropicProvider::finishValidation(CredentialStatus status, const QString &message)
+{
+    emit credentialsChecked(status, message);
+}
+
+QStringList AnthropicProvider::parseModelIds() const
+{
+    QStringList ids;
+    QJsonParseError parseError;
+    const QJsonDocument document = QJsonDocument::fromJson(m_auxBody, &parseError);
+    if (parseError.error != QJsonParseError::NoError || !document.isObject())
+        return ids;
+
+    // Anthropic 返回 {"data":[{"id":"...","display_name":"..."}],"has_more":...}
+    const QJsonArray data = document.object().value(QStringLiteral("data")).toArray();
+    for (const QJsonValue &entry : data) {
+        const QString id = entry.toObject().value(QStringLiteral("id")).toString().trimmed();
+        if (!id.isEmpty() && !ids.contains(id))
+            ids.append(id);
+    }
+    return ids;
 }
 
 bool AnthropicProvider::processStreamEvent(const SseEvent &event)
@@ -217,6 +338,11 @@ bool AnthropicProvider::processStreamEvent(const SseEvent &event)
 
 void AnthropicProvider::handleChunk(int handle, const QByteArray &chunk)
 {
+    // 校验 / 模型清单请求：只累积响应体，不做协议解析
+    if (handle == m_validateHandle || handle == m_modelsHandle) {
+        m_auxBody.append(chunk);
+        return;
+    }
     if (handle != m_handle || m_handle == 0)
         return;
 
@@ -234,6 +360,20 @@ void AnthropicProvider::handleChunk(int handle, const QByteArray &chunk)
 
 void AnthropicProvider::handleFinished(int handle)
 {
+    if (handle == m_validateHandle) {
+        m_validateHandle = 0;
+        finishValidation(CredentialStatus::Valid, QStringLiteral("Key 有效"));
+        return;
+    }
+    if (handle == m_modelsHandle) {
+        m_modelsHandle = 0;
+        const QStringList ids = parseModelIds();
+        if (ids.isEmpty())
+            emit modelsFetched(QStringList(), QStringLiteral("未能从厂商接口解析出模型清单"));
+        else
+            emit modelsFetched(ids, QString());
+        return;
+    }
     if (handle != m_handle)
         return;
     m_handle = 0;
@@ -297,6 +437,19 @@ void AnthropicProvider::handleFinished(int handle)
 void AnthropicProvider::handleFailed(int handle, int httpStatus, NetworkTransport::Failure failure,
                                      const QString &errorText)
 {
+    if (handle == m_validateHandle) {
+        m_validateHandle = 0;
+        const CredentialStatus status = statusForFailure(httpStatus, failure);
+        finishValidation(status, status == CredentialStatus::Invalid
+                                      ? QStringLiteral("Key 无效或无权限")
+                                      : QStringLiteral("无法验证（限流或网络问题）"));
+        return;
+    }
+    if (handle == m_modelsHandle) {
+        m_modelsHandle = 0;
+        emit modelsFetched(QStringList(), QStringLiteral("拉取失败，已保留内置清单"));
+        return;
+    }
     if (handle != m_handle)
         return;
     m_handle = 0;

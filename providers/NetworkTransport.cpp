@@ -22,6 +22,20 @@ QNetworkTransport::QNetworkTransport(QObject *parent)
 
 int QNetworkTransport::post(const Request &request)
 {
+    Request postRequest = request;
+    postRequest.method = QStringLiteral("POST");
+    return send(postRequest);
+}
+
+int QNetworkTransport::get(const Request &request)
+{
+    Request getRequest = request;
+    getRequest.method = QStringLiteral("GET");
+    return send(getRequest);
+}
+
+int QNetworkTransport::send(const Request &request)
+{
     if (!m_manager || request.url.isEmpty())
         return 0;
 
@@ -33,7 +47,9 @@ int QNetworkTransport::post(const Request &request)
     if (request.timeoutMs > 0)
         netRequest.setTransferTimeout(request.timeoutMs);
 
-    QNetworkReply *reply = m_manager->post(netRequest, request.body);
+    const bool useGet = request.method.compare(QStringLiteral("GET"), Qt::CaseInsensitive) == 0;
+    QNetworkReply *reply = useGet ? m_manager->get(netRequest)
+                                  : m_manager->post(netRequest, request.body);
     const int handle = m_nextHandle++;
     m_replies.insert(handle, reply);
 

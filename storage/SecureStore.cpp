@@ -70,6 +70,11 @@ QString SecureStore::providerApiKeyId(const QString &providerId)
     return QStringLiteral("provider.%1.api_key").arg(providerId);
 }
 
+QString SecureStore::webSearchApiKeyId()
+{
+    return QStringLiteral("web.search.api_key");
+}
+
 QString SecureStore::dataRoot() const
 {
     if (!m_dataRoot.isEmpty()) {

@@ -35,7 +35,7 @@ public:
     struct Request
     {
         QString url;
-        QString method = QStringLiteral("POST");  ///< 目前仅实现 POST
+        QString method = QStringLiteral("POST");  ///< POST / GET
         QList<QPair<QString, QString>> headers;
         QByteArray body;
         int timeoutMs = 0;  ///< 0 表示不设置显式超时
@@ -44,8 +44,11 @@ public:
     explicit NetworkTransport(QObject *parent = nullptr);
     ~NetworkTransport() override = default;
 
-    /// 发起请求，返回句柄（>0）；无法发起时返回 0
+    /// 发起 POST，返回句柄（>0）；无法发起时返回 0
     virtual int post(const Request &request) = 0;
+
+    /// 发起 GET（用于 `GET /models` 校验与模型清单拉取），返回句柄；无法发起时返回 0
+    virtual int get(const Request &request) = 0;
 
     /// 中断在途请求；未知句柄为空操作。被中断的请求**不会**再发出 finished / failed
     virtual void abort(int handle) = 0;
@@ -75,9 +78,13 @@ public:
     explicit QNetworkTransport(QObject *parent = nullptr);
 
     int post(const Request &request) override;
+    int get(const Request &request) override;
     void abort(int handle) override;
 
 private:
+    /// post / get 的公共实现：按 request.method 选择动词，其余处理完全一致
+    int send(const Request &request);
+
     QNetworkAccessManager *m_manager = nullptr;
     QHash<int, QNetworkReply *> m_replies;
     int m_nextHandle = 1;

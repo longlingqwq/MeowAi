@@ -46,6 +46,8 @@ public:
 
     /// 多 Provider 各自独立 Key 的命名规则：provider.<providerId>.api_key
     static QString providerApiKeyId(const QString &providerId);
+    /// 联网检索密钥的固定键名：web.search.api_key（**绝不落明文**，只走本保险库）
+    static QString webSearchApiKeyId();
 
 private:
     QString dataRoot() const;

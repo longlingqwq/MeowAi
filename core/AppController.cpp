@@ -1,5 +1,6 @@
 #include "core/AppController.h"
 
+#include "core/ai/ProviderCatalog.h"
 #include "core/chat/ChatController.h"
 #include "core/chat/ChatHistoryModel.h"
 #include "core/retriever/NullRetriever.h"
@@ -7,14 +8,18 @@
 #include "core/theme/ThemeManager.h"
 #include "core/theme/ThemePresetManager.h"
 #include "core/update/UpdateManager.h"
+#include "core/web/HttpWebSearchProvider.h"
+#include "core/web/WebSearchService.h"
 #include "platform/PlatformAdapter.h"
 #include "platform/PlatformAdapterFactory.h"
+#include "storage/AiConfigStore.h"
 #include "storage/AppPaths.h"
 #include "storage/ChatStore.h"
 #include "storage/Database.h"
 #include "storage/PersonalizationStore.h"
 #include "storage/SecureStore.h"
 #include "storage/ThemeStore.h"
+#include "storage/WebConfigStore.h"
 
 #include <QCoreApplication>
 #include <QDir>
@@ -85,6 +90,11 @@ ChatController *AppController::chatController() const
     return m_chat.get();
 }
 
+ProviderCatalog *AppController::providerCatalog() const
+{
+    return m_providerCatalog.get();
+}
+
 ChatHistoryModel *AppController::chatHistoryModel() const
 {
     return m_chatHistory.get();
@@ -144,20 +154,45 @@ void AppController::initialize()
     m_chatHistory = std::make_unique<ChatHistoryModel>(m_chatStore.get());
     m_chatHistory->reload();
 
+    // 厂商 / 模型目录（v0.2.3）：只读内嵌资源；即便解析失败也不影响其余模块启动
+    m_providerCatalog = std::make_unique<ProviderCatalog>();
+    QString catalogError;
+    if (!m_providerCatalog->load(&catalogError)) {
+        setStatusMessage(QStringLiteral("厂商目录不可用：%1").arg(catalogError));
+    } else if (!m_providerCatalog->warnings().isEmpty()) {
+        // 单条厂商非法只跳过该条并记警告，不阻断启动
+        setStatusMessage(QStringLiteral("厂商目录部分条目被跳过：%1")
+                             .arg(m_providerCatalog->warnings().join(QStringLiteral("; "))));
+    }
+
+    // AI 接入配置（v0.2.3）：只读写 config.json 的 ai 段，Key 仍只走 SecureStore
+    m_aiConfigStore = std::make_unique<AiConfigStore>(m_paths->configFile());
+
+    // 联网检索（v0.2.3 新模块）：开关与端点记忆在 config.json 的 web 段；
+    // HTTP 后端一律经 providers/NetworkTransport 发出（此处不注入，由实现自建生产传输）
+    m_webConfigStore = std::make_unique<WebConfigStore>(m_paths->configFile());
+    m_webSearchProvider = std::make_unique<HttpWebSearchProvider>();
+    m_webSearch = std::make_unique<WebSearchService>(m_webSearchProvider.get(),
+                                                     m_secureStore.get(), m_webConfigStore.get());
+
     // AI 接入（功能 #3 / #4）：对话控制器，Key 只从 SecureStore 读取，历史经会话模型
-    m_chat = std::make_unique<ChatController>(m_secureStore.get(), m_chatHistory.get());
+    m_chat = std::make_unique<ChatController>(m_secureStore.get(), m_chatHistory.get(),
+                                              m_providerCatalog.get(), m_aiConfigStore.get(),
+                                              m_webConfigStore.get(), m_webSearch.get());
 
     // 资料库检索接口仅预留：阶段一固定挂载空实现（不实现检索算法）
     m_retriever = std::make_unique<NullRetriever>();
 
-    setStatusMessage(QStringLiteral("已就绪 · 平台 %1 · 内置技能 %2 个 · 密钥后端 %3 · 个性化 %4 · 会话 %5")
-                         .arg(m_platform->platformId())
-                         .arg(skillCount)
-                         .arg(m_secureStore->backendName())
-                         .arg(m_themeManager && m_themeManager->available() ? QStringLiteral("可用")
-                                                                            : QStringLiteral("不可用"))
-                         .arg(m_chatHistory && m_chatHistory->available() ? QStringLiteral("可用")
-                                                                         : QStringLiteral("不可用")));
+    setStatusMessage(
+        QStringLiteral("已就绪 · 平台 %1 · 内置技能 %2 个 · 厂商 %3 家 · 密钥后端 %4 · 个性化 %5 · 会话 %6")
+            .arg(m_platform->platformId())
+            .arg(skillCount)
+            .arg(m_providerCatalog ? m_providerCatalog->providerIds().size() : 0)
+            .arg(m_secureStore->backendName())
+            .arg(m_themeManager && m_themeManager->available() ? QStringLiteral("可用")
+                                                               : QStringLiteral("不可用"))
+            .arg(m_chatHistory && m_chatHistory->available() ? QStringLiteral("可用")
+                                                             : QStringLiteral("不可用")));
 }
 
 void AppController::setStatusMessage(const QString &message)

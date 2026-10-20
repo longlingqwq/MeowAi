@@ -2,12 +2,15 @@ import QtQuick
 import QtQuick.Controls
 
 /**
- * 对话页：**左侧会话列表**（多会话 / 新建 / 切换 / 删除）+ 连接设置（可折叠）+ 消息流 + 输入条。
+ * 对话页：**左侧会话列表**（多会话 / 新建 / 切换 / 删除）+ 接入设置（厂商 / 模型 / 档位 / 密钥）
+ * + 消息流 + 输入条。
  *
  * 纯展示与绑定：
  *  - 消息流直接绑定 core 的会话历史模型 `History`（ChatHistoryModel），
  *    持久化、上下文裁剪、流式节流都在 core 层，本文件不碰数据库；
- *  - 发送经 `Chat`（ChatController）转发，本文件不碰网络与密钥。
+ *  - 发送经 `Chat`（ChatController）转发，本文件不碰网络与密钥；
+ *  - 厂商 / 模型 / 档位全部来自 `Chat.providerOptions()` / `modelOptions()` / `thinkingLevels`，
+ *    即 core/ai/ProviderCatalog 的数据视图——**新增厂商零 UI 改动**。
  *
  * 布局全部在本文件内自由编排（阶段三要求：UI 组件位置可在 ui 模块内自定义）。
  */
@@ -19,6 +22,94 @@ Item {
     /// 统一展示的错误：优先网络 / 密钥错误，其次会话历史错误
     readonly property string errorText: Chat.lastError.length > 0 ? Chat.lastError : History.lastError
 
+    /// 厂商 / 模型下拉的数据快照：ComboBox 需要字符串数组，id 单独并行保存
+    property var providerNames: []
+    property var providerIds: []
+    property var modelNames: []
+    property var modelIds: []
+    /// 当前「厂商 + 模型」是否存在高级原生参数覆盖
+    property bool hasAdvanced: false
+
+    /// 档位显示名：档位是契约常量，展示名只做本地化，不影响下发字段
+    function levelLabel(level) {
+        switch (level) {
+        case "off": return qsTr("关")
+        case "low": return qsTr("低")
+        case "medium": return qsTr("中")
+        case "high": return qsTr("高")
+        default: return level
+        }
+    }
+
+    /// 厂商的展示名（下拉里存的是展示名数组，这里按 id 反查，避免再存一份映射）
+    function providerLabel(providerId) {
+        const index = page.providerIds.indexOf(providerId)
+        return index >= 0 ? page.providerNames[index] : providerId
+    }
+
+    function refreshProviders() {
+        const options = Chat.providerOptions()
+        const names = []
+        const ids = []
+        for (let i = 0; i < options.length; ++i) {
+            names.push(options[i].displayName)
+            ids.push(options[i].id)
+        }
+        page.providerNames = names
+        page.providerIds = ids
+        providerBox.currentIndex = ids.indexOf(Chat.providerId)
+    }
+
+    function refreshModels() {
+        const options = Chat.modelOptions(Chat.providerId)
+        const names = []
+        const ids = []
+        for (let i = 0; i < options.length; ++i) {
+            names.push(options[i].displayName)
+            ids.push(options[i].id)
+        }
+        page.modelNames = names
+        page.modelIds = ids
+        modelBox.currentIndex = ids.indexOf(Chat.modelId)
+    }
+
+    function refreshAdvanced() {
+        page.hasAdvanced = Object.keys(Chat.advancedParams()).length > 0
+    }
+
+    function refreshSelection() {
+        refreshModels()
+        refreshAdvanced()
+    }
+
+    function openModelMenu() {
+        modelMenu.openAt(modelPill, page)
+    }
+
+    /// 密钥三态徽标（文案与色调都只在这里映射，避免散落各处）
+    function credentialTone() {
+        switch (Chat.credentialStatus) {
+        case "valid": return "ok"
+        case "invalid": return "danger"
+        case "notConfigured": return "danger"
+        case "unverifiable": return "accent"
+        default: return "neutral"
+        }
+    }
+    function credentialText() {
+        if (Chat.validating)
+            return qsTr("校验中…")
+        switch (Chat.credentialStatus) {
+        case "valid": return qsTr("密钥有效")
+        case "invalid": return qsTr("密钥无效")
+        case "notConfigured": return qsTr("未配置密钥")
+        case "unverifiable":
+            return Chat.credentialMessage.length > 0 ? Chat.credentialMessage : qsTr("无法验证")
+        default:
+            return Chat.hasApiKey ? qsTr("密钥已就绪（未校验）") : qsTr("未配置密钥")
+        }
+    }
+
     /// 组装一次发送：用户消息由 core 落库入模型，这里只负责转发与清空输入
     function submit() {
         const text = composerField.text.trim()
@@ -26,13 +117,18 @@ Item {
             return
 
         const imagePath = imageField.text.trim()
-        if (imagePath.length > 0)
+        if (imagePath.length > 0 && Chat.supportsVision)
             Chat.sendWithImage(text, imagePath)
         else
             Chat.send(text)
 
         composerField.text = ""
         transcriptView.positionViewAtEnd()
+    }
+
+    Component.onCompleted: {
+        refreshProviders()
+        refreshSelection()
     }
 
     // ================================================================= 会话列表
@@ -181,14 +277,14 @@ Item {
         }
     }
 
-    // ============================================================ 连接设置卡
+    // ============================================================ 接入设置卡
     MSurface {
         id: connCard
         anchors.left: convPanel.right
         anchors.right: parent.right
         anchors.top: parent.top
         anchors.leftMargin: Theme.s4
-        height: connCard.expanded ? 190 : 56
+        height: connCard.expanded ? connHead.height + connBody.implicitHeight + Theme.s4 : 56
         clip: true
 
         property bool expanded: false
@@ -218,14 +314,14 @@ Item {
 
                 MChip {
                     tone: "accent"
-                    text: Chat.providerId
+                    text: page.providerLabel(Chat.providerId)
                     anchors.verticalCenter: parent.verticalCenter
                 }
 
                 MChip {
                     dot: true
-                    tone: Chat.hasApiKey ? "ok" : "danger"
-                    text: Chat.hasApiKey ? qsTr("密钥已就绪") : qsTr("未配置密钥")
+                    tone: page.credentialTone()
+                    text: page.credentialText()
                     anchors.verticalCenter: parent.verticalCenter
                 }
 
@@ -270,6 +366,7 @@ Item {
                 NumberAnimation { duration: Theme.dBase }
             }
 
+            // 厂商 + 模型
             Row {
                 spacing: Theme.s3
 
@@ -280,10 +377,11 @@ Item {
 
                 MCombo {
                     id: providerBox
-                    width: 150
-                    model: ["openai", "anthropic"]
-                    currentIndex: Chat.providerId === "anthropic" ? 1 : 0
-                    onActivated: (index) => Chat.setProvider(index === 1 ? "anthropic" : "openai")
+                    width: 176
+                    model: page.providerNames
+                    currentIndex: -1
+                    placeholderText: qsTr("选择厂商")
+                    onActivated: (index) => Chat.setProvider(page.providerIds[index])
                 }
 
                 MLabel {
@@ -291,15 +389,140 @@ Item {
                     anchors.verticalCenter: parent.verticalCenter
                 }
 
-                MField {
-                    id: modelField
-                    width: 260
-                    text: Chat.model
-                    placeholderText: qsTr("模型名")
-                    onEditingFinished: Chat.model = text
+                MCombo {
+                    id: modelBox
+                    width: 250
+                    model: page.modelNames
+                    currentIndex: -1
+                    enabled: page.modelNames.length > 0
+                    placeholderText: Chat.customizable ? qsTr("自定义厂商请在下方手填模型名")
+                                                       : qsTr("选择模型")
+                    onActivated: (index) => Chat.setModelId(page.modelIds[index])
                 }
             }
 
+            // 自定义厂商：手填 API 链接与模型名称
+            Row {
+                spacing: Theme.s3
+                visible: Chat.customizable
+
+                MLabel {
+                    label: qsTr("API 链接")
+                    anchors.verticalCenter: parent.verticalCenter
+                }
+
+                MField {
+                    id: baseUrlField
+                    width: 320
+                    text: Chat.customBaseUrl
+                    placeholderText: qsTr("https://your-gateway.example/v1")
+                    onEditingFinished: Chat.setCustomBaseUrl(text)
+                }
+
+                MLabel {
+                    label: qsTr("模型名")
+                    anchors.verticalCenter: parent.verticalCenter
+                }
+
+                MField {
+                    id: customModelField
+                    width: 190
+                    text: Chat.modelId
+                    placeholderText: qsTr("例如 gpt-5")
+                    onEditingFinished: Chat.modelId = text
+                }
+            }
+
+            Text {
+                width: parent.width
+                visible: Chat.customizable
+                text: qsTr("自定义厂商只按 OpenAI 兼容协议发送（/chat/completions）；链接与模型名填全后才会发请求。")
+                color: Theme.textGhost
+                font.pixelSize: Theme.fLabel
+                wrapMode: Text.Wrap
+            }
+
+            // 思考档位 + 高级参数入口
+            Row {
+                spacing: Theme.s2
+
+                MLabel {
+                    label: qsTr("档位")
+                    anchors.verticalCenter: parent.verticalCenter
+                }
+
+                Repeater {
+                    model: Chat.thinkingLevels
+
+                    Rectangle {
+                        id: levelChip
+                        required property string modelData
+
+                        readonly property bool active: Chat.thinkingLevel === levelChip.modelData
+
+                        width: levelText.implicitWidth + 16
+                        height: 24
+                        radius: Theme.rPill
+                        color: levelChip.active ? Theme.accent : Theme.overlayHover
+                        border.width: 1
+                        border.color: levelChip.active ? Theme.accent : Theme.hairline
+
+                        Behavior on color {
+                            ColorAnimation { duration: Theme.dFast }
+                        }
+
+                        Text {
+                            id: levelText
+                            anchors.centerIn: parent
+                            text: page.levelLabel(levelChip.modelData)
+                            color: levelChip.active ? Theme.accentInk : Theme.textDim
+                            font.pixelSize: Theme.fLabel
+                            font.weight: Font.Medium
+                        }
+
+                        TapHandler { onTapped: Chat.setThinkingLevel(levelChip.modelData) }
+                    }
+                }
+
+                Text {
+                    visible: Chat.thinkingLevels.length === 0
+                    text: qsTr("该模型未声明思考档位")
+                    color: Theme.textGhost
+                    font.pixelSize: Theme.fSmall
+                    anchors.verticalCenter: parent.verticalCenter
+                }
+
+                MChip {
+                    visible: page.hasAdvanced
+                    tone: "accent"
+                    text: qsTr("高级参数已覆盖档位")
+                    anchors.verticalCenter: parent.verticalCenter
+                }
+
+                Item {
+                    width: 1
+                    height: 1
+                }
+
+                MButton {
+                    text: qsTr("模型与参数")
+                    variant: "quiet"
+                    small: true
+                    anchors.verticalCenter: parent.verticalCenter
+                    onClicked: page.openModelMenu()
+                }
+
+                MButton {
+                    text: qsTr("拉取清单")
+                    variant: "quiet"
+                    small: true
+                    visible: Chat.modelListFetchable
+                    anchors.verticalCenter: parent.verticalCenter
+                    onClicked: Chat.fetchModelList()
+                }
+            }
+
+            // 密钥
             Row {
                 spacing: Theme.s3
 
@@ -310,7 +533,7 @@ Item {
 
                 MField {
                     id: keyField
-                    width: 320
+                    width: 300
                     echoMode: TextInput.Password
                     placeholderText: Chat.dataStoreAvailable
                                      ? qsTr("仅加密存入本机保险库，绝不明文落盘")
@@ -338,8 +561,25 @@ Item {
                     anchors.verticalCenter: parent.verticalCenter
                     onClicked: Chat.eraseApiKey()
                 }
+
+                MButton {
+                    text: qsTr("验证")
+                    variant: "ghost"
+                    small: true
+                    enabled: Chat.dataStoreAvailable && Chat.hasApiKey && !Chat.validating
+                    anchors.verticalCenter: parent.verticalCenter
+                    onClicked: Chat.validateApiKey()
+                }
+
+                MChip {
+                    dot: true
+                    tone: page.credentialTone()
+                    text: page.credentialText()
+                    anchors.verticalCenter: parent.verticalCenter
+                }
             }
 
+            // 图片上传确认（安全约束：必须显式确认）
             Row {
                 spacing: Theme.s3
 
@@ -362,27 +602,23 @@ Item {
                     anchors.verticalCenter: parent.verticalCenter
                 }
             }
+
         }
     }
 
-    // 外部源变化时回同步（避免用户操作打断绑定后状态漂移）
-    Connections {
-        target: Chat
+    // ============================================================ 模型二级菜单
+    ModelMenu {
+        id: modelMenu
+        onConfigureRequested: {
+            modelMenu.close()
+            webPanel.openAt(modelPill, page)
+        }
+    }
 
-        function onProviderChanged() {
-            providerBox.currentIndex = Chat.providerId === "anthropic" ? 1 : 0
-        }
-        function onModelChanged() {
-            if (modelField.text !== Chat.model)
-                modelField.text = Chat.model
-        }
-        function onImagesConfirmedChanged() {
-            imageConfirmSwitch.checked = Chat.imagesConfirmed
-        }
-        function onApiKeyStateChanged() {
-            if (!Chat.dataStoreAvailable)
-                keyField.text = ""
-        }
+    // 联网搜索（第三级弹层）：默认不显眼，仅从二级菜单的「配置…」进入
+    // ------------------------------------------------------------------
+    WebSearchPanel {
+        id: webPanel
     }
 
     // ---------------------------------------------------------- 底部区
@@ -392,7 +628,7 @@ Item {
         anchors.right: parent.right
         anchors.bottom: parent.bottom
         anchors.leftMargin: Theme.s4
-        spacing: Theme.s3
+        spacing: Theme.s2
 
         // 错误横幅：只在有错误时占位
         MSurface {
@@ -431,6 +667,134 @@ Item {
             }
         }
 
+        // 当前选择条：模型触发器（悬停 1s / 单击 / 长按 三种方式打开二级菜单）
+        Item {
+            width: parent.width
+            height: 28
+
+            Row {
+                anchors.left: parent.left
+                anchors.verticalCenter: parent.verticalCenter
+                spacing: Theme.s2
+
+                MLabel {
+                    label: qsTr("当前")
+                    anchors.verticalCenter: parent.verticalCenter
+                }
+
+                Rectangle {
+                    id: modelPill
+                    width: pillText.implicitWidth + Theme.s3 * 2
+                    height: 26
+                    radius: Theme.rPill
+                    color: (pillHover.hovered || modelMenu.visible) ? Theme.accentGhost
+                                                                    : Theme.overlayHover
+                    border.width: 1
+                    border.color: (pillHover.hovered || modelMenu.visible) ? Theme.accentHair
+                                                                           : Theme.hairline
+
+                    Behavior on color {
+                        ColorAnimation { duration: Theme.dFast }
+                    }
+
+                    Text {
+                        id: pillText
+                        anchors.centerIn: parent
+                        text: page.providerLabel(Chat.providerId) + " · "
+                              + (Chat.modelId.length > 0 ? Chat.modelId : qsTr("未选择模型"))
+                        color: (pillHover.hovered || modelMenu.visible) ? Theme.accentHi : Theme.textDim
+                        font.pixelSize: Theme.fLabel
+                        font.weight: Font.Medium
+                    }
+
+                    HoverHandler {
+                        id: pillHover
+                        onHoveredChanged: {
+                            if (hovered)
+                                hoverTimer.restart()
+                            else
+                                hoverTimer.stop()
+                        }
+                    }
+
+                    TapHandler {
+                        onTapped: page.openModelMenu()
+                        onLongPressed: page.openModelMenu()
+                    }
+                }
+
+                Timer {
+                    id: hoverTimer
+                    interval: 1000
+                    onTriggered: page.openModelMenu()
+                }
+
+                MChip {
+                    visible: Chat.thinkingLevel.length > 0
+                    tone: "neutral"
+                    text: qsTr("档位 %1").arg(page.levelLabel(Chat.thinkingLevel))
+                    anchors.verticalCenter: parent.verticalCenter
+                }
+
+                MChip {
+                    visible: Chat.supportsVision
+                    tone: "neutral"
+                    text: qsTr("支持图片")
+                    anchors.verticalCenter: parent.verticalCenter
+                }
+
+                MChip {
+                    visible: page.hasAdvanced
+                    tone: "accent"
+                    text: qsTr("高级参数")
+                    anchors.verticalCenter: parent.verticalCenter
+                }
+
+                MChip {
+                    visible: Chat.webSearchEnabled
+                    dot: true
+                    tone: Chat.webSearchReady ? "ok" : "accent"
+                    text: Chat.webSearchSearching ? qsTr("正在联网搜索…")
+                                                  : (Chat.webSearchReady ? qsTr("智能联网")
+                                                                         : qsTr("联网未就绪"))
+                    anchors.verticalCenter: parent.verticalCenter
+                }
+
+                MButton {
+                    text: qsTr("模型与参数")
+                    variant: "quiet"
+                    small: true
+                    anchors.verticalCenter: parent.verticalCenter
+                    onClicked: page.openModelMenu()
+                }
+            }
+        }
+
+        // 联网来源 chip：仅在本轮检索命中时出现（数据来自 Chat；本文件不碰网络）
+        Row {
+            width: parent.width
+            spacing: Theme.s2
+            visible: Chat.webSearchSources.length > 0
+
+            MChip {
+                dot: true
+                tone: "ok"
+                text: qsTr("已联网 · %1 条来源").arg(Chat.webSearchSources.length)
+            }
+
+            Repeater {
+                model: Chat.webSearchSources.slice(0, 3)
+
+                MChip {
+                    required property var modelData
+                    tone: "neutral"
+                    text: modelData.title.length > 20
+                          ? modelData.title.substring(0, 20) + "…"
+                          : modelData.title
+                }
+            }
+        }
+
         // 输入条
         MSurface {
             id: composer
@@ -451,11 +815,58 @@ Item {
                     width: parent.width
                     spacing: Theme.s2
 
+                    // 「智能联网」开关：像网页端一样随手开合（UI 侧唯一显眼入口，配置收进第三级弹层）
+                    Rectangle {
+                        id: webToggle
+                        width: webToggleRow.implicitWidth + 20
+                        height: 34
+                        radius: Theme.rPill
+                        color: Chat.webSearchEnabled
+                               ? (webToggleHover.hovered ? Theme.accentHi : Theme.accent)
+                               : (webToggleHover.hovered ? Theme.overlayHover : Theme.overlayFaint)
+                        border.width: 1
+                        border.color: Chat.webSearchEnabled ? Theme.accent : Theme.hairline
+
+                        Behavior on color {
+                            ColorAnimation { duration: Theme.dFast }
+                        }
+
+                        Row {
+                            id: webToggleRow
+                            anchors.centerIn: parent
+                            spacing: 6
+
+                            Rectangle {
+                                width: 6
+                                height: 6
+                                radius: 3
+                                anchors.verticalCenter: parent.verticalCenter
+                                color: Chat.webSearchEnabled
+                                       ? Theme.accentInk
+                                       : (Chat.webSearchReady ? Theme.ok : Theme.textFaint)
+                            }
+
+                            Text {
+                                text: Chat.webSearchSearching ? qsTr("联网中…") : qsTr("智能联网")
+                                color: Chat.webSearchEnabled ? Theme.accentInk : Theme.textDim
+                                font.pixelSize: Theme.fLabel
+                                font.weight: Font.Medium
+                                anchors.verticalCenter: parent.verticalCenter
+                            }
+                        }
+
+                        HoverHandler { id: webToggleHover }
+
+                        TapHandler {
+                            onTapped: Chat.webSearchEnabled = !Chat.webSearchEnabled
+                        }
+                    }
+
                     MField {
                         id: composerField
-                        width: parent.width - sendButton.width
-                               - (cancelButton.visible ? cancelButton.width + parent.spacing : 0)
-                               - parent.spacing
+                        width: parent.width - webToggle.width - sendButton.width
+                               - (cancelButton.visible ? cancelButton.width : 0)
+                               - parent.spacing * (cancelButton.visible ? 3 : 2)
                         placeholderText: Chat.busy
                                          ? qsTr("正在生成…")
                                          : qsTr("输入消息，回车发送")
@@ -497,15 +908,26 @@ Item {
                         topPadding: 4
                         bottomPadding: 4
                         font.pixelSize: Theme.fSmall
-                        placeholderText: qsTr("图片路径（可选）")
-                        enabled: !Chat.busy
+                        placeholderText: Chat.supportsVision
+                                         ? qsTr("图片路径（可选）")
+                                         : qsTr("当前模型不支持图片输入")
+                        enabled: !Chat.busy && Chat.supportsVision
                     }
 
                     Text {
+                        visible: Chat.supportsVision
                         text: Chat.imagesConfirmed
                               ? qsTr("已确认：该图片会被上传")
                               : qsTr("未确认：该图片不会被上传")
                         color: Chat.imagesConfirmed ? Theme.warn : Theme.textGhost
+                        font.pixelSize: Theme.fSmall
+                        anchors.verticalCenter: parent.verticalCenter
+                    }
+
+                    Text {
+                        visible: !Chat.supportsVision
+                        text: qsTr("该模型未声明视觉能力，附图入口已关闭")
+                        color: Theme.textGhost
                         font.pixelSize: Theme.fSmall
                         anchors.verticalCenter: parent.verticalCenter
                     }
@@ -638,7 +1060,39 @@ Item {
         }
     }
 
-    // 一轮结束：把视图贴到最新（用户消息由 core 落库入模型，无需在此追加）
+    // 外部源变化时回同步（避免用户操作打断绑定后状态漂移）
+    Connections {
+        target: Chat
+
+        function onProviderChanged() {
+            providerBox.currentIndex = page.providerIds.indexOf(Chat.providerId)
+            baseUrlField.text = Chat.customBaseUrl
+            customModelField.text = Chat.modelId
+            page.refreshSelection()
+        }
+        function onModelChanged() {
+            modelBox.currentIndex = page.modelIds.indexOf(Chat.modelId)
+            customModelField.text = Chat.modelId
+            page.refreshAdvanced()
+            if (!Chat.supportsVision)
+                imageField.text = ""
+        }
+        function onThinkingChanged() {
+            page.refreshAdvanced()
+        }
+        function onApiKeyStateChanged() {
+            if (!Chat.dataStoreAvailable)
+                keyField.text = ""
+        }
+        function onImagesConfirmedChanged() {
+            imageConfirmSwitch.checked = Chat.imagesConfirmed
+        }
+        function onModelListChanged() {
+            page.refreshModels()
+        }
+    }
+
+    // 一轮结束 / 流式增量：把视图贴到最新
     Connections {
         target: Chat
 
@@ -646,7 +1100,6 @@ Item {
             transcriptView.positionViewAtEnd()
         }
 
-        // 流式增量：保持视图贴底
         function onReplyTextChanged() {
             if (Chat.busy)
                 transcriptView.positionViewAtEnd()

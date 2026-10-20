@@ -17,3 +17,11 @@ meowai_add_test(tst_skill)
 meowai_add_test(tst_retriever)
 meowai_add_test(tst_chatstore)
 meowai_add_test(tst_themepreset)
+meowai_add_test(tst_providercatalog)
+meowai_add_test(tst_aiconfigstore)
+meowai_add_test(tst_websearch)
+meowai_add_test(tst_toolcall)
+
+# 厂商目录自检需要读取源码树中的 resources/providers.json：
+# 测试目标不携带 qrc 资源（与主题预设测试同一策略），故以编译宏传入源码根目录。
+target_compile_definitions(tst_providercatalog PRIVATE MEOWAI_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
