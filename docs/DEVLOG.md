@@ -39,6 +39,402 @@
 
 ## 四、日志（按时间倒序，最新在最上）
 
+### 2026-10-20 ｜ 总代理验收 + 双手册交付 ｜ 状态：已验收（初步）
+- **阶段**：阶段二（收尾）
+- **负责人**：总代理（审查与验收，不写代码）
+- **分支 / PR**：`v0.2.5`（PR 待创建）
+- **交付内容**：
+  - **粗略验收**：资料库 / RAG（M1–M8）、联网搜索（v0.2.3）、v0.2.5 修复已完成；`ctest` **22/22 通过**；分层与红线未见越界；文献已随本次同步（`PLAN.md` 勾选、待定项修正）。
+  - **新增 [USER_GUIDE.md](./USER_GUIDE.md)**：面向最终用户的配置、对话、资料库、个性化、隐私与 FAQ。
+  - **新增 [DEVELOPER_GUIDE.md](./DEVELOPER_GUIDE.md)**：架构分层、模块地图、数据库结构、各功能原理与注意事项、扩展指南、已知技术债、进度快照。
+  - **更新 [README.md](./README.md)**：手册入口与读者说明（手册不替代规范，冲突以 Charter 为准）。
+- **遗留 / 待定**：
+  - `防崩溃自检`（PLAN 阶段二）仍为未勾选，需作为资料库完成后的补齐项。
+  - **PR 仍未创建**，DoD 第 3 条（PR 可见 diff）未满足。
+  - `.tmpdb/` 未纳入 `.gitignore`；`scripts/fetch-pdfium.ps1` 未提交。
+  - `Skill` 调用、`UpdateManager` 仍为骨架；视频仅占位。
+- **备注**：本条目为初步验收，补 PR 后可转正式验收。
+
+### 2026-10-20 ｜ v0.2.5 修订：图片导入无反馈 + 拖拽文件入库 ｜ 状态：待验收
+- **阶段**：阶段二（资料库 / RAG · M7 UI 修订）
+- **负责人**：开发 Agent（待补充）
+- **分支 / PR**：`v0.2.5`
+- **交付内容**：
+  - **修复「选择图片后没有反应」**：`FileDialog.selectedFiles` 是 `list<url>` 序列，直接透传给 `Q_INVOKABLE importFiles(const QVariantList&)` 时转换失败不会抛到界面，表现为点击确定后毫无动静。改为在 QML 侧统一走 `page.toPathList()` 转成字符串路径数组后再调用，文件与图片走同一条可靠路径。
+  - **导入反馈前置且更明确**：`Library.message` 从面板底部小字移到工具栏下方，允许换行（最多 3 行）；`importFiles` 的结果文案带上目标小库名与成功数量，部分失败时同时给出「已导入 N 个 + 失败原因」，不再只显示失败串。
+  - **新增拖拽入库**：中栏（文件区）整体作为 `DropArea`，接受 `text/uri-list`；拖入时显示琥珀色高亮遮罩与「松开即可导入到「当前小库」」提示，松开后复用同一导入链路（复制入库副本，原文件不动）。未选中小库时自动落到「默认资料库」。
+  - **导入/关联按钮不再要求先选小库**：只要资料库可用即可点击，由 `ensureCollection()` 兜底创建默认小库，避免按钮禁用造成「点了没反应」的错觉。
+  - **修复图片描述服务的悬空指针**：`rebuildCaptionService()` 原先先 `reset()` 服务再 `setCaptionService(nullptr)`，索引器会比较到已释放的指针；改为先摘指针再销毁。
+  - **补齐「自动索引为什么没动静」的可操作提示**：导入后索引本来就会自动入队；缺前置条件时（图片缺视觉模型 / 文本缺 embedding），文件列表上方直接给出数量提示与「去配置」按钮，点击滚动到右侧对应设置段，配置后点「重建索引」即可补齐。
+- **自测**：Debug 构建通过；离屏启动 8s 无 QML 运行期警告；检查用户数据目录确认此前图片导入确实未落库（`library_files` 为空、`library/` 为空），与「无反馈」现象一致。
+- **遗留 / 待定**：
+  - Qt 官方包未带 WebP 图片插件，`.webp` 可入库但图片描述会失败并停留在「待索引」；需要时再补插件或收窄过滤项。
+  - 拖拽目前只接受文件，拖入文件夹不会自动转为「关联文件夹」。
+- **备注**：删除小库 / 解除关联仍然只删索引，不触碰用户原文件。
+
+### 2026-10-20 ｜ v0.2.5 资料库 / RAG · M8：隐私与成本（CostEstimator / 同意记录 / 日志脱敏）｜ 状态：待验收
+- **阶段**：阶段二（资料库 / RAG · 模块 M8 / M1–M8 的第 8 步）
+- **负责人**：开发 Agent（待补充）
+- **分支 / PR**：`v0.2.5`
+- **交付内容**：
+  - **新增 `core/library/CostEstimator.{h,cpp}` + `resources/pricing.json`（内嵌 `:/pricing/pricing.json`）**：纯本地查表，**不发请求、不读文件内容**；金额 = token ÷ 1,000,000 × 每百万 token 单价，vision 先按 `tokensPerImage` 折算 token。价格表按 `providerId + modelId` 精确匹配，**未收录的模型返回 `known=false`、金额 0**（UI 显示「—」并提示只估算 token），绝不编造价格。JSON 缺失 / 损坏 / 条目缺 id 一律降级为「未加载」，不崩。
+  - **成本预估接入 `LibraryController`**：按当前小库（或全部）粗略估算「首次建向量 token / 图片张数 / 每次对话注入上限 token」，分别给出 embedding、vision、chat 三行金额（货币符号随价格表），并附「仅作量级参考」说明；图内价格逐条带 `source` 字段指向官方价格页，便于核对。
+  - **同意记录**：`LibraryConfigData.consentGiven / consentAt / enabled` 持久化在 `config.json` 的 library 段；首次启用、首次挂载、导入后首次索引、图片外发**都要求同意**。`revokeConsent()` 立即关闭挂载与启用，并让 indexer / caption 服务同步为「未同意」——**撤回后一个请求都不再发**，已建本地索引保留。
+  - **日志脱敏**：新增链路（Indexer / Controller / CostEstimator）**不打印正文、不含 Key、不打印请求体**；错误只回结构化原因 + 面向用户的中文说明。图片外发沿用 M3 的「显式同意」闸门（`ImageCaptionService::setConsentGiven`），索引器在未同意时直接把图片标记为 `pending`，连本地转码都不做。
+  - **新增 `tests/tst_cost.cpp`（4 项，离线）**：默认价格表可读、未收录模型 `known=false`、已知单价百万 token 换算正确（$0.02 / 1M）、0 token 金额为 0。
+- **自测**：Debug 构建通过；`ctest -C Debug -R "tst_cost|tst_chunk|tst_providercatalog"` **3/3** 通过（0.35s）；程序离屏启动 10s 无 QML 运行期警告。
+- **遗留 / 待定**：
+  - 价格为**内置参考值**，厂商调价需更新 `resources/pricing.json`（版本内不联网拉取价格）。
+  - 成本为**估算**：`vision` 的每图 token 为经验值，实际以厂商账单为准；chat 输出 token 未纳入「每轮上限」（当前按输入预算展示）。
+- **出处（价格表）**：
+  - OpenAI embeddings 价格：https://openai.com/index/new-embedding-models-and-api-updates/
+  - OpenAI API 价格：https://openai.com/api/pricing/
+  - 通义千问 embedding 兼容接口：https://help.aliyun.com/zh/model-studio/embedding-interfaces-compatible-with-openai
+  - 智谱开放平台价格：https://open.bigmodel.cn/pricing
+  - OpenAI 视觉图片 token：https://platform.openai.com/docs/guides/images-vision
+
+### 2026-10-20 ｜ v0.2.5 资料库 / RAG · M7：索引器 + QML 资料库页（LibraryIndexer / LibraryController / LibraryPage）｜ 状态：待验收
+- **阶段**：阶段二（资料库 / RAG · 模块 M7 / M1–M8 的第 7 步）
+- **负责人**：开发 Agent（待补充）
+- **分支 / PR**：`v0.2.5`
+- **交付内容**：
+  - **新增 `core/library/LibraryIndexer.{h,cpp}`（FIFO 逐文件索引，本地解析 + 可选外发）**：
+    - 文本链路：`ExtractorRegistry` 本地解析 → `ChunkSplitter` 切分 → `LibraryStore::replaceChunks` → `EmbeddingService` → `SqliteVectorIndex`；状态机 `pending / indexed / needs_embedding / no_text_layer / failed / stale / unsupported`。
+    - 图片链路：**未同意 / 未配置视觉模型 → `pending`，一个请求都不发**；已同意则由 `ImageCaptionService` 生成描述后与文本同路径入库；限流 / 超时 / 断网一律「待索引」并保留原因，**不误判图片无效**。
+    - 降级不崩：未配置 embedding、未同意外发、向量化服务忙 → 片段照常入库并标记 `needs_embedding`；扫描件无文本层 → `no_text_layer`；视频 → `unsupported`；解析失败 → `failed`；**任何路径都不删除用户文件**。
+    - 队列同一时刻只处理一个文件，避免打满厂商限流；`cancel()` 清空队列并中断在途请求，已入库片段保留。
+  - **新增 `core/library/LibraryController.{h,cpp}`（QML 唯一门面）**：
+    - 小库 CRUD / 选择、导入文件（复制入库）、关联文件夹、手动重建快照、解除关联、移除记录、单文件 / 整库 / 全部重建索引；
+    - 检索参数（Top-K / 每文件上限 / token 预算 / 阈值 / 邻居半径 / FTS 兜底 / 切分尺寸与重叠）读写即持久化，并**同步刷新 `RagRetriever` 配置**；
+    - embedding / caption 的厂商、模型、独立 Key 配置（Key 仅写 SecureStore 的 `library.embedding.<id>.api_key` / `library.caption.<id>.api_key`，缺省回退到对话厂商 Key）；自定义厂商沿用「AI 接入」里的 API 地址；
+    - 同意 / 启用 / 撤回、挂载集合持久化（`mountChanged` 由 AppController 同步给 `ChatController::setMountedCollections`）；
+    - 库内关键词搜索（纯本地，返回文件名 + 定位 + 摘要）；成本预估。
+  - **扩展 `core/ai/ProviderCatalog` + `resources/providers.json`**：新增 `embedding`（可用性 / 模型 / 维度 / 默认）与 `vision.captionModel` 元数据，UI **完全由目录数据驱动**，不硬编码厂商或模型；`ProviderCatalog.cpp` 对缺 id 条目只跳过并记警告。
+  - **新增 `ui/LibraryPage.qml`（三栏：小库 / 文件与快照 / 检索·服务·隐私·成本）**：导入与关联走系统 `FileDialog / FolderDialog`；删除小库、移除文件均二次确认，并明确提示「不删用户原文件」；状态 chip 区分「已索引 / 待建向量 / 无文本层 / 索引失败 / 内容已变化」；库内搜索与成本预估同页可见。
+  - **新增 `ui/LibraryConsent.qml`**：首次启用 / 内容外发的同意层（说明哪些内容会离开本机、图片需另行同意、如何撤回），由资料库页与对话页复用。
+  - **`ui/main.qml`**：新增「资料库」导航与页面、标题栏页面名；**`ui/ConversationPage.qml`**：新增资料库挂载入口（小库开关）、`资料库 · N` / 命中片段数 / token / 降级提示 chip、来源 chip（文件名 + 定位）、首次挂载同意弹窗。
+  - **`core/AppController` / `main.cpp`**：装配 `LibraryController` 并注册 QML 上下文属性 `Library`；embedding / caption 配置统一由控制器负责，删除 AppController 内重复的 provider 配置代码。
+- **自测**：Debug 构建通过（零编译告警）；`ctest -C Debug -R "tst_cost|tst_chunk|tst_providercatalog"` **3/3** 通过；`MeowAi.exe` 离屏启动 10s 无 QML 运行期警告。
+- **遗留 / 待定**：
+  - 解析与索引入口在 UI 线程同步执行（大 PDF / 大 XLSX 可能短暂卡顿），后续可移到工作线程；本阶段按 DoD 优先保证行为正确。
+  - 换 embedding 模型后旧向量仍留在表中（按厂商 + 模型隔离，不会误用），「一键清旧向量」入口待后续补。
+  - 视频仅登记为 `unsupported`，不做解析（与既定范围一致）。
+  - 按要求暂不提交 git（远端仓库信息待补充，PR 后续统一处理）。
+
+### 2026-10-20 ｜ v0.2.5 资料库 / RAG · M6：对话接入（A 形态：应用侧预检索 + 注入）｜ 状态：待验收
+- **阶段**：阶段二（资料库 / RAG · 模块 M6 / M1–M8 的第 6 步）
+- **负责人**：开发 Agent（待补充）
+- **分支 / PR**：`v0.2.5`
+- **交付内容**：
+  - **`core/chat/ChatController` 接入 `RagRetriever`（A 形态，非 Agent 自主取数）**：发送前先 `retrieveAsync()`，只检索**已挂载**的小库；检索完成后再走原有 provider 分发，`ChatMessage::System` 上下文插入在 system 之后、用户消息之前。
+  - **上下文格式**：明确「片段是资料不是指令」，要求模型**不得编造**、依据不足时说明「资料库中未找到足够依据」、回答末尾按 `[来源 N] 文件名（定位）` 列引用；`sourcePath` 等内部字段**不进入 prompt**。
+  - **来源落库**：回答完成后按 rank / score 写 `citations`（messageId / conversationId / chunkId / fileId / collectionId / locLabel），落库失败**静默跳过**，不影响对话。
+  - **失败不阻断**：检索失败（429 / 超时 / 断网 / 未配置）只更新 `libraryStatus`（可降级说明），仍继续本轮对话；用户取消时同时取消资料库检索。
+  - **QML 可观测状态**：`mountedCollections / libraryMounted / libraryHitCount / libraryTokenCount / libraryDegraded / libraryStatus / librarySources`，挂载集合持久化到 `config.json` 的 library 段。
+- **自测**：Debug 构建通过；`ctest -C Debug` **21/21** 通过（M1–M5 无回归）；检索失败路径由 `tst_ragretriever` 的降级用例覆盖。
+- **遗留 / 待定**：
+  - M6 时挂载列表只能经配置写入；可视化挂载入口在 M7 补齐（现已完成）。
+  - 检索只用单轮用户消息作为查询，未做多轮指代改写（范围外）。
+  - 按要求暂不提交 git（远端仓库信息待补充，PR 后续统一处理）。
+
+### 2026-10-20 ｜ v0.2.5 资料库 / RAG · M5：检索与上下文组装（RagRetriever / RetrievalConfig）｜ 状态：待验收
+- **阶段**：阶段二（资料库 / RAG · 模块 M5 / M1–M8 的第 5 步）
+- **负责人**：开发 Agent（待补充）
+- **分支 / PR**：`v0.2.5`
+- **交付内容**：
+  - **新增 `core/retriever/RetrievalConfig.h`**：`topK`（K 值）、`perFileLimit`（每文件片段上限）、`tokenBudget`（token 预算）、`similarityThreshold`（相似度阈值）、`neighborRadius`（邻居扩展半径）、`ftsFallback`（关键词兜底开关）、`maxCandidates`（粗排上限）。三项用户可配置项**改动后行为随之改变**（有单测证明）。
+  - **新增 `core/retriever/RagRetriever.{h,cpp}`（向量 + FTS5 兜底 + 上限 + 邻居 + 阈值 + 预算）**：
+    - **检索顺序**：① 候选召回（向量过阈值 / 关键词按词覆盖度）→ ② **每文件上限截断** → ③ **邻居扩展** → ④ **token 预算截断**。每文件上限在扩展**之前**生效，否则单个大文件仍会占满预算；邻居扩展按 `ordinal` 取前后各 `neighborRadius` 段（`LibraryStore::chunksInOrdinalRange`），保持「前邻居 → 命中 → 后邻居」的阅读顺序，邻居分数为命中分 ×0.85（仅用于排序展示，不改变定位信息）。
+    - **向量路径（异步 `retrieveAsync()`）**：复用 M4 的 `EmbeddingService` 向量化查询（经 `NetworkTransport`），与 `SqliteVectorIndex` 中的向量逐条算**余弦相似度**；维度不同 / 零范数 / 低于阈值一律跳过；结果按分数降序并截断到 `maxCandidates`。
+    - **FTS5 关键词兜底（同步 `retrieve()` 实现 `DocumentRetriever`）**：查询按空白与中英文标点拆词，逐词调用 `LibraryStore::searchChunkIds` 并按**词覆盖度**累计打分（`0.5 + 0.5 × 覆盖率`，余弦阈值不误杀关键词分）；**同步接口绝不联网**（单测断言零请求）。
+    - **合并**：向量命中不足 K 时，用关键词结果补齐（去重 + 同样受每文件上限约束，`mode = hybrid`），符合「先粗排后按分数截断」。
+    - **降级不崩**：embedding 未配置 / 未建模型 → 直接关键词（`degraded = true` + 中文 `note`，**零请求**）；embedding 失败（429 / 超时 / 断网 / 401）→ 按 `ftsFallback` 降级并保留原因；`ftsFallback = false` 时结构化 `failed`。
+    - **挂载范围**：`setMountedCollections()` 为空时**不检索**（避免把未挂载库内容注入对话）；向量与关键词都只覆盖挂载库的文件，`RetrievedChunk::collectionId` 标注来源库。
+  - **修改 `core/retriever/DocumentRetriever.h`**（按已锁定决策 2 的破坏性扩展）：`RetrievedChunk` 增加 `chunkId / fileId / collectionId / fileName / sourcePath / ordinal / locKind / locLabel / locPage / locSheet / locRowFrom / locRowTo / tokenEst`；`sourcePath` 仅供内部核对，**不注入 prompt**。`NullRetriever` 无需改动即可编译（新增字段均有默认值）。
+  - **新增 `tests/tst_ragretriever.cpp`（11 项，真实 SQLite + `FakeNetworkTransport`，全程离线）**：关键词兜底保留文件/定位元数据、每文件上限（2 → 4 条随配置变化）、邻居扩展（ordinal 0/1/2）、token 预算（250 → ≤2 条，5000 → 4 条）、挂载库过滤、未挂载零结果、向量阈值过滤（cos 0 被丢弃）、hybrid 补齐、429 降级关键词、关闭兜底后结构化失败、同步接口零网络请求。
+- **自测**：Debug 构建通过（零编译告警）；`ctest -C Debug` **21/21** 通过（新增 `tst_ragretriever`），M1–M4 用例无回归。
+- **遗留 / 待定**：
+  - `RagRetriever` 的异步结果尚未接入对话（M6）；UI 展示（来源 chip / 命中数 / token）在 M7。
+  - 关键词兜底依赖 `searchChunkIds` 的 FTS5 短语匹配，拆词后按覆盖度排序；**未做 rerank**（范围外）。
+  - 向量检索为内存全量余弦（当前规模足够）；后端可替换接口已在 M4 留好。
+  - 按要求暂不提交 git（远端仓库信息待补充，PR 后续统一处理）。
+
+### 2026-10-20 ｜ v0.2.5 资料库 / RAG · M4：切分与向量（ChunkSplitter / EmbeddingService / SqliteVectorIndex）｜ 状态：待验收
+- **阶段**：阶段二（资料库 / RAG · 模块 M4 / M1–M8 的第 4 步）
+- **负责人**：开发 Agent（待补充）
+- **分支 / PR**：`v0.2.5`
+- **交付内容**：
+  - **新增 `core/retriever/ChunkSplitter.{h,cpp}`（纯本地切分，无网络、无持久化）**：
+    - 输入是解析层产出的 `ExtractedSegment`，输出可直接交给 `LibraryStore::replaceChunks` 的 `ChunkRecord`：**定位元数据逐条保留**（`loc_kind / loc_label / loc_page / loc_sheet / loc_row_from / loc_row_to`），`ordinal` 在文件内**连续递增**（邻居扩展依赖连续性）。
+    - **文本类**：按字符窗口切分，切点优先落在**段落 / 句末**（`\n\n`、`\n`、`。！？；` 等），下限取目标尺寸的 3/5，避免切点过早导致片段过碎；相邻块重叠 `overlap` 字符。
+    - **表格类（`loc_kind = row | sheet`）按行切分并**每块重复表头 + 分隔行**：脱离表头的 `| 1200万 |` 无法理解行列含义，重复表头后每块仍可独立读懂；行区间按数据行偏移**重算**（`loc_row_from / loc_row_to` 与定位串同步更新，XLSX 保留工作表名，形如「Sheet1 第 12-18 行」）。
+    - **两项参数都可配置且行为随之改变**（DoD 第 5 条）：`chunkSize`（下限 40 字符）与 `overlap`（不超过目标尺寸的一半，防止原地打转）；`estimateTokens()` 提供保守 token 估算（CJK 1 字 ≈ 1 token，其余 4 字符 ≈ 1 token），用于 token 预算与成本预估。
+    - 空 / 纯空白片段直接跳过，不产生零字块。
+  - **新增 `core/retriever/VectorIndex.h` + `storage/SqliteVectorIndex.{h,cpp}`（向量后端，接口可替换）**：
+    - 存储格式为 **float32 小端**连续字节，Android 与桌面读写同一份字节；按「厂商 + 模型」隔离检索。
+    - 维度校验**整批拒绝**：空向量或批内维度不一致时一条都不写（`false + error`），杜绝半批脏数据导致检索期维度错位；写入走事务。
+    - `removeByFile()` 按文件清理（换 embedding 模型必须重建，理由见下），`vectors()` / `count()` 供 M5 检索与「是否已建向量」状态展示。
+    - **schema 事实**：`chunk_vectors` 以 `chunk_id` 为主键 → **一个片段只有一条向量**；换模型写入同一片段是**覆盖**而非并存，故换模型时必须先 `removeByFile` 再重建，DEVLOG 在此明确记录以免后续误判。
+  - **新增 `core/retriever/EmbeddingService.{h,cpp}`（异步批量向量化）**：
+    - 协议口径：**OpenAI 兼容的 `POST /embeddings`**（`{"model","input","dimensions"}`，`data[].embedding` + `usage.total_tokens`）；国内主流厂商（通义千问兼容模式 / 智谱 / 硅基流动等）与 OpenAI 同一套格式，因此**复用同一实现**，靠 `ProviderConfig` 切换 `baseUrl` / 鉴权 / 额外头，**不为每家厂商单独写实现**。
+    - **网络一律经 `NetworkTransport` 发出**（与 `core/web/HttpWebSearchProvider` 同一口径），URL 与请求头复用 providers 层的 `ProviderUtils::endpointUrl / requestHeaders`；端点路径、鉴权与返回结构**逐项查官方文档核实**（出处见文末），不凭记忆猜测。
+    - 按 `LibraryEmbeddingConfig::batchSize` **串行切批**，结果按响应 `index` **归位到输入顺序**（服务端乱序返回也不串位）；`usage` 跨批**累加**；`dimensions > 0` 时在请求里显式下发并**回验维度**。
+    - **延迟索引（降级不崩）**：未配置 Key / 模型 / 地址时 `isReady()` 为 false，`embed()` 直接回 `ChatError::NotConfigured` 且**一个请求都不发**；上层据此把文件标记为 `needs_embedding`，配好服务后重建即可。
+    - Anthropic 明确返回 `NotConfigured` + 中文提示（其无 embedding 接口，需单独配置一个支持 `/embeddings` 的服务）。
+    - 失败**结构化映射**：401/403 → `Unauthorized`、429 → `RateLimited`、超时 → `Timeout`、断网 → `NetworkUnavailable`、响应非法 / 维度不符 / 数量不符 → `InvalidResponse`；**绝不把限流或断网误判为「密钥无效」**。
+    - **安全**：Key 只来自调用方传入的 `ProviderConfig`，本类不读 SecureStore、不落盘、不打印日志；错误信息**不含 Key / 请求体 / 文件内容**（URL 里也不出现 Key）；`cancel()` 中断在途请求并回 `Cancelled`。
+  - **新增 `tests/tst_chunk.cpp`（14 项）+ `tests/tst_embedding.cpp`（12 项）**，`tests/CMakeLists.txt` 登记到 `tst_chunk` / `tst_embedding`；`CMakeLists.txt` 新增 `ChunkSplitter.cpp` / `EmbeddingService.cpp` / `SqliteVectorIndex.cpp`。
+    - 切分用例：token 估算、尺寸与重叠生效、**参数改动行为随之改变**（`chunkSize` 变小片段变多、`overlap = 0` 时相邻片段不再重叠）、定位元数据与 ordinal 保留、表格按行切**每块重复表头**且行区间连续、XLSX 定位串保留工作表名、空片段跳过、图片定位串保留。
+    - 向量用例（真实 SQLite，临时目录）：无数据库安全失败、小端 float32 往返（1.0f 字节为 `00 00 80 3F`，长度非 4 倍数视为损坏不崩）、**维度不符整批拒绝**、换模型覆盖语义、按文件清理。
+    - embedding 用例（**全程离线，网络经 `FakeNetworkTransport` 注入**）：未配置 Key **零请求**、Anthropic 无端点零请求、分批串行 + 乱序 index 归位 + usage 累加、请求体与鉴权头逐项核对（含「密钥不进 URL」）、401 → `Unauthorized` 且**首个批次失败即停**、429 → `RateLimited`、超时 / 断网映射、维度不符与数量不符 → `InvalidResponse`、空输入不发请求、`cancel()` 中断并回 `Cancelled`；断言中额外校验**错误信息不含 Key**。
+- **自测**：Debug 构建通过（零编译告警）；`ctest -C Debug` **20/20** 通过（新增 `tst_chunk` / `tst_embedding`）；原有 18 个用例无回归。
+- **遗留 / 待定**：
+  - **入库与检索未接**：本步只交付「切分 + 向量读写 + 向量化服务」，把文件真正标记为已索引 / 待索引（`LibraryIndexer`）与 **M5 `RagRetriever`**（向量 + FTS5 兜底 + 每文件上限 + 邻居扩展 + 阈值 + token 预算）属后续模块。
+  - **`RetrievalConfig.h`（K / 每文件上限 / token 预算三项可配置）属 M5**。
+  - **换模型重建**：目前靠调用方显式 `removeByFile` + 重建实现，UI 侧一键重建入口在 M7。
+  - **无 embedding 时的降级展示**（「待索引」状态与关键词兜底提示）在 M5 / M7。
+  - 按要求暂不提交 git（远端仓库信息待补充，PR 后续统一处理）。
+- **出处（embedding 端点 / 鉴权 / 参数 / 返回结构，均为官方文档）**：
+  - OpenAI：`POST /v1/embeddings`，`Bearer`，`input` / `dimensions`，返回 `data[].embedding` 与 `usage.total_tokens`：https://platform.openai.com/docs/api-reference/embeddings
+  - 阿里云百炼（OpenAI 兼容）：`POST /compatible-mode/v1/embeddings`，`text-embedding-v3/v4`（v4 支持 2048→64 维，单行 8192 token、单次最多 10 行）：https://help.aliyun.com/zh/model-studio/embedding-interfaces-compatible-with-openai
+  - 智谱：`POST https://open.bigmodel.cn/api/paas/v4/embeddings`，`embedding-3`（默认 2048 维，单次最多 64 条）：https://docs.bigmodel.cn/cn/guide/models/embedding/embedding-3
+  - 硅基流动：`POST https://api.siliconflow.cn/v1/embeddings`（bge-m3 等，单次条数与维度以模型页为准）：https://docs.siliconflow.cn/cn/api-reference/embeddings/create-embeddings
+  - 无 embedding 接口（需另配服务）：Kimi https://platform.kimi.com/docs/api/overview ；DeepSeek https://api-docs.deepseek.com/quick_start/pricing ；Anthropic 建议使用 Voyage AI：https://docs.anthropic.com/en/docs/build-with-claude/embeddings
+  - Qt `QDataStream`（`setByteOrder` / `setFloatingPointPrecision` 保证 float32 小端跨平台一致）：https://doc.qt.io/qt-6/qdatastream.html
+
+### 2026-10-20 ｜ v0.2.5 资料库 / RAG · M3-d：图片类（本地转码 + 视觉 caption 服务；视频按用户指示不实现）｜ 状态：待验收
+- **阶段**：阶段二（资料库 / RAG · 模块 M3-d / M3 拆 4 小步的最后一步）
+- **负责人**：开发 Agent（待补充）
+- **分支 / PR**：`v0.2.5`
+- **交付内容**：
+  - **`Extractor.h` 契约扩展（图片类口径）**：新增 `ImageCaptionTask`（`bytes` / `mimeType` / `width` / `height` / `sourcePath`）与 `ExtractionResult::captionTasks`。
+    - 为什么不能把 caption 塞进同步 `extract()`：解析层契约是「本地同步、绝不联网」，若让 `extract()` 去调视觉模型，同步接口就被迫偷偷联网、破坏分层。因此图片类**本地只产出「已转码、可外发」的任务**，`segments` 为空（**预期而非缺陷**：入库文本必须由视觉模型给出，本地不产文本、不臆造）。
+    - 「图片序号」**不由解析层赋予**（解析层只负责单张图片本身，不参与排序），由上层在 caption 阶段给出，避免同一条记录两处编号互相打架。
+  - **新增 `core/library/extract/ImageTranscoder.{h,cpp}`（纯本地）**：校验（存在 / 普通文件 / 未超 `kMaxExtractBytes`）→ 解码（`setAutoTransform(true)` 按 **EXIF 方向校正**，避免「躺倒」的图影响视觉判断）→ 长边压缩（默认 **1536**，**只缩不放**）→ 统一编码（**优先 PNG**，图文/截图无损不糊；失败回落 JPEG），BMP / GIF / WEBP 一律归一到外发通用格式，绝不原样外发 BMP。
+    - 防「解压炸弹」：源图像素超过 **6400 万**直接拒绝（约 256 MB 位图），不让一张超大图把内存吃满。
+    - 失败一律 `false + error`：文件不存在 / 编码不可读 / 解码失败 / 转码失败各自区分；**不可读时的错误里列出运行库当前可读格式**，便于现场自查 webp 等格式是否缺 `imageformats` 插件（GIF 取首帧，不产多片段）。
+    - 本类**不联网、不写盘、不改动原图**。
+  - **新增 `core/library/extract/ImageCaptionExtractor.{h,cpp}`（`id = "image"`）**：经**同一注册点**接入（与文本类、视频预留点一致），`maxEdge` 由上层按 `LibraryCaptionConfig::maxEdge` 注入，保证「转码口径」只有一处；静态 `segmentFromCaption(序号, 描述)` 负责把描述回填为入库片段（`loc_kind = image`、定位串「图片 #N」），定位元数据只在解析层定义一次。
+  - **新增 `core/library/ImageCaptionService.{h,cpp}`（异步 caption 服务）**：
+    - **复用既有 `AiProvider::sendChat`**，不新建视觉 Provider、不新增厂商协议实现；provider 由调用方（M4 索引器 / M7 控制器）用 `ProviderFactory` 建好、按 **caption 的 providerId / modelId** 配置后注入，本服务**不读 SecureStore、不碰持久化、不落盘**。
+    - **一次调用同时拿「描述」与「强制文字提取」**（锁定决策 4，不额外再调 OCR/单独接口）：`promptProfile` 提供 `default`（先整体描述，再**逐字完整抄录**图中文字并保留分行与表格行列、不许翻译概括省略，最后给 3-8 个检索关键词）与 `text-heavy`（扫描件/表格照片/截图：**抄录优先**，描述从简）；两档都强制要求「无文字时写『无可见文字』」，杜绝模型静默跳过。
+    - `stream = false` 一次拿完整文本；`temperature = 0.2`（描述/抄录属事实性任务，压低随机性）；`maxTokens` / `maxEdge` / `promptProfile` 全部来自 `LibraryCaptionConfig`。
+    - **图片外发必须用户显式同意（硬性约束）**：`consentGiven` 默认 **false**，未置位时**一个请求都不发**，直接回 `ChatError::ImagesNotConfirmed`「该图片未上传，已标记为待索引」；置位后才在请求上带 `imagesConfirmed = true`。
+    - **降级不崩、且不误判**：provider 未配置或未指定 caption 模型 → `NotConfigured`（上层配好视觉模型后重试）；模型返回空文本 → `EmptyResponse`；provider 的 429 / 超时 / 断网 / 401 **原样结构化回传**，**绝不把限流或断网当成「图片无效」**；本地转码失败用 `Unknown` 但 message 明确写「本地转码失败」以免被当作网络故障。
+    - FIFO 队列逐张处理（provider 单实例同一时刻只承载一个在途请求），**单张失败不阻断后续**；`cancelAll()` 清空队列并中断在途；`queueDrained()` 供批量收尾。
+    - 队列推进用 `QMetaObject::invokeMethod` **排队调用而非直接递归**：即使 provider 同轮回信号，栈深也不随队列长度增长。
+    - 全程不打印图片内容、API Key 或完整请求体。
+  - **`ExtractorRegistry` 登记 `image`**（顺序：plain → csv → json → pdf → docx → xlsx → pptx → **image** → video）；`forPath("照片.jpg")` 由「返回 `nullptr`（暂不支持）」变为命中 `id = "image"`；`CMakeLists.txt` 新增 `ImageCaptionService.cpp`、`ImageCaptionExtractor.cpp`、`ImageTranscoder.cpp`。
+  - **视频按本次指示不实现**：`VideoExtractor` 仅保留既有注册点（返回 false +「视频解析本次未实现」），不新增任何视频解析代码。
+  - **新增 `tests/tst_imagecapture.cpp`（11 用例 / 13 项）+ `tests/CMakeLists.txt` 登记**：图片夹具用 `QImage` **现场生成**（PNG / JPG / BMP），caption 用**假 Provider**（零网络、零 Key、按脚本同步回信号），因此不提交任何二进制夹具、不依赖真实厂商。用例覆盖：长边压缩且等比（3000×1000 → 1536×512，产物可解码复验）、**只缩不放**（800×600 保持）、BMP 归一到 PNG/JPEG、文件不存在/内容非图片分别报错、注册点路由到 `image`、`maxEdge` 注入生效、`图片 #N` 定位、**未同意时请求数为 0**、单次请求形态逐项核对（model / stream=false / imagesConfirmed=true / maxTokens / 单条消息单张图片 / **外发字节解码为 512×384 而原图是 1200×900** / 提示词含「逐字完整抄录」与「关键词」）、`text-heavy` 档提示词、未指定模型与 provider 未配置均为 `NotConfigured`、**429 原样回传且后续图片仍能成功**（单张失败不阻断队列）；每个用例末尾用 `isIdle()` 断言队列确实收敛，避免「悄悄卡在处理中」被漏测。
+  - **`tests/tst_extractors.cpp` 同步更新**：`ids()` 含 `image`；图片断言由「`nullptr`」改为「命中 `id = image`」。
+- **自测**：Debug 构建通过（零编译告警）；`tst_imagecapture` **13 项全 PASS（0 skipped）**；`tst_extractors` **19 项仍全 PASS**（PDFium 路径无回归）；`ctest -C Debug` **18/18** 通过；`MeowAi.exe --smoke-test` 退出码 **0**。
+- **遗留 / 待定**：
+  - **入库与 UI 未接**：本步只交付「本地转码 + caption 服务」，图片真正落库（写 `chunks` / 建向量）与首次同意弹窗、来源 chip 属 M4 / M7。
+  - **未接 OCR 专用模型**：扫描件靠同一提示词「强制逐字抄录」覆盖；OCR 不在 `docs/PROMPT.md` 本次范围内。
+  - **`resources/pricing.json` 视觉单价**（图转 token 的成本口径）属 M8。
+  - **GIF 只取首帧**、不产多片段；多帧逐帧描述未做。
+  - **视频不实现**（用户指示），注册点保留。
+  - 按要求暂不提交 git（远端仓库信息待补充，PR 后续统一处理）。
+- **出处**：
+  - Qt `QImageReader`（`setAutoTransform` EXIF 校正 / `canRead` / `supportedImageFormats` / `size` / `errorString`）：https://doc.qt.io/qt-6/qimagereader.html
+  - Qt `QImage`（`scaled` 等比缩放 / `save` 编码为 PNG、JPEG）：https://doc.qt.io/qt-6/qimage.html
+  - Anthropic 视觉输入（`source.type = base64`，图片与文本同一条消息）：https://docs.anthropic.com/en/docs/build-with-claude/vision
+  - 通义千问（阿里云百炼）视觉理解模型：https://help.aliyun.com/zh/model-studio/vision
+  - Kimi（月之暗面）视觉模型：https://platform.moonshot.cn/docs/guide/use-kimi-vision-model
+  - 智谱 GLM 视觉模型（GLM-4V-Flash，图像理解/字幕）：https://docs.bigmodel.cn/cn/guide/models/free/glm-4v-flash ；模型总览（视觉理解 vs 视觉推理）：https://docs.bigmodel.cn/cn/guide/start/model-overview
+  - OpenAI 兼容多模态请求格式（`image_url` + base64 data URL）沿用本仓库 **v0.2.3 条目已核对**的官方出处；`supportsVision` 能力标记同源。
+
+### 2026-10-20 ｜ v0.2.5 资料库 / RAG · M3-c：PDF 文本层解析（PDFium，本地放置 + 仓库忽略）｜ 状态：待验收
+- **阶段**：阶段二（资料库 / RAG · 模块 M3-c / M3 拆 4 小步的第 3 步）
+- **负责人**：开发 Agent（待补充）
+- **分支 / PR**：`v0.2.5`
+- **交付内容**：
+  - **新增 `scripts/fetch-pdfium.ps1`（抓取脚本，入库）**：按**固定 tag** `chromium/8111` 拉取官方预编译产物 `pdfium-win-x64.tgz`，解压到 `third_party/pdfium/`，并校验 `include/fpdfview.h`、`include/fpdf_text.h`、`lib/pdfium.dll.lib`、`bin/pdfium.dll` 四项齐全。
+    - 先按 tag 解析资产再下载，且走 **API 资产端点**（而非 `github.com` 浏览器直链）：本机实测 `github.com:443` 不可达、`api.github.com` / `release-assets.githubusercontent.com` 可达，走 API 端点可绕开 302 跳转到被墙域名的失败。**不使用编辑器/脚本内的相对路径假设**，默认目标目录由脚本自身位置推导仓库根。
+    - **不下载到仓库内部任何会被提交的位置**；产物为解压即用，不改 CMake 缓存。
+  - **`.gitignore` 新增 `third_party/pdfium/`（本地放置 + 仓库忽略）**：PDFium 二进制（含 `pdfium.dll` 约 7.6 MB）**不进仓库、不进 PR diff**；PR 中只出现脚本 + CMake 改动。
+  - **`CMakeLists.txt` 条件启用**：目录存在（三个必要文件齐全）→ `add_library(pdfium SHARED IMPORTED GLOBAL)` 并链接 `MeowAiLib`、定义 `MEOWAI_HAVE_PDFIUM`（**PUBLIC**，便于测试按有/无两种口径切换断言）；**缺失则不定义宏、不报错**，编译降级实现。
+    - 同时为 `MeowAi` 与 `tst_extractors` 加 `POST_BUILD` 的 `copy_if_different`：Windows 运行期不查 PATH 之外的库路径，`pdfium.dll` 必须与可执行文件同目录。
+    - 配置期打印明确状态：「PDFium 已启用（PDF 文本层解析）」或「未检测到：PDF 解析降级为『未启用』（抓取：pwsh scripts/fetch-pdfium.ps1）」。
+  - **新增 `core/library/extract/PdfTextExtractor.{h,cpp}`（`id = "pdf"`）**：
+    - 抽取范围仅限**文本层**：`FPDF_LoadMemDocument64` → 逐页 `FPDF_LoadPage` + `FPDFText_LoadPage` → `FPDFText_CountChars` / `FPDFText_GetText` → 每页一个片段，`loc_kind = page` + `loc_page`，定位串「第 N 页」。
+    - **走内存加载而非按路径加载**：避免含中文/非 ASCII 的路径在不同平台被当作本地编码解析而失败（本次范围内用户文件多为中文名）。
+    - 文本层返回 UTF-16：`QString::fromUtf16` 解码后把 `\r\n`、孤立 `\r` 归一为 `\n`，再逐行 `trimmed` 并丢弃空行（文本层常带整行空白），压缩后再产出片段，避免脏片段进入后续切分。
+    - **失败原因逐一区分、绝不静默返回空结果**：`FPDF_GetLastError()` 映射为中文原因（文件损坏 / 非 PDF 格式 / **已加密需口令** / 不支持的加密方案 / 页面无法解析）；整册无文本层 → 报「该 PDF 无文本层：N 页均未解析出文字（可能为扫描件或纯图片 PDF，需 OCR）」；全页解析失败 → 报「文件可能已损坏」；页数为 0 → 报「不包含任何页面」。
+    - 无 PDFium 构建时：`supports()` **仍认领 pdf**（保证注册表路由一致），`extract()` 返回 `false` + 「PDF 支持未启用：…运行 pwsh scripts/fetch-pdfium.ps1 后重新配置构建即可启用文本层解析」→ 由上层落成 `no_text_layer`，**其它格式解析完全不受影响**。
+    - 沿用 `kMaxExtractBytes`（64 MB）上限；只读，不做网络请求，**不做 OCR**（扫描件不在本次范围）。
+    - PDFium 全局库用**函数内静态对象只初始化一次**（`FPDF_InitLibrary`），静态析构时 `FPDF_DestroyLibrary`，避免进程退出时泄漏。
+  - **`ExtractorRegistry` 登记 `pdf`**（顺序：plain → csv → json → **pdf** → docx → xlsx → pptx → video），上层仍只用 `forPath()`；`CMakeLists.txt` 的 `core/library` 清单新增 `PdfTextExtractor.cpp`。
+  - **测试 `tests/tst_extractors.cpp` 扩充到 17 用例（含 init/cleanup 共 19 项）**：
+    - **新增测试专用 PDF 写入器 `pdfBytes()`**：手写**最小合法 PDF**（Catalog / Pages / Font / 每页「内容流 + 页对象」），**交叉引用表偏移在生成时精确计算**；正文用 Base14 `Helvetica` + `Tj`，无需嵌入字体。传空字符串的页只放图形指令（`re f`）→ **模拟扫描件（无文本层）**。因此**无需预置任何二进制夹具**即可覆盖真实 PDFium 解析路径。
+    - `pdfExtractsPageTextWithLocators`：两页 → 2 片段、`loc_kind = page`、`loc_page` 1/2、定位串「第 1 页 / 第 2 页」、第 1 页文本精确等于 `Boiler Room Notes`、第 2 页含 `Pump 2 checks weekly`；**无 PDFium 构建时**该用例自动改判为「降级口径」：返回 false、错误含「未启用」、片段为空。
+    - `pdfReportsMissingTextLayerSeparately`：图形页 PDF → 报「无文本层」；非 PDF 内容 → 报「打开失败」且**断言不出现「无文本层」字样**（证明两类失败被区分，不会互相误判）；无 PDFium 构建时 `QSKIP`。
+    - `registryRoutesByExtension` 更新：`ids()` 含 `pdf`，`报告.pdf` 命中 `id = "pdf"`；`image`（jpg）仍**明确返回 `nullptr`**（M3-d 待补，上层须给「暂不支持」提示）。
+- **自测**：Debug 构建通过（零编译告警，配置期确认「PDFium 已启用」）；`tst_extractors` **19 项全 PASS（0 skipped）**；`ctest -C Debug` **17/17** 通过（M1 / M2 / M3-a / M3-b 无回归）；`MeowAi.exe --smoke-test` 退出码 **0**；`build/Debug/` 下 `pdfium.dll` 与 `MeowAi.exe` / `tst_extractors.exe` 同目录（POST_BUILD 拷贝生效）。
+  - 上游产物实测：`third_party/pdfium/VERSION` 为 `MAJOR=158 / MINOR=0 / BUILD=8111 / PATCH=0`，即锁定的 `chromium/8111`。
+- **遗留 / 待定**：
+  - **M3-d**：`ImageCaptionExtractor`（图片走 providers 层视觉模型，需 `providers.json` 视觉配置 + AiProvider 多模态支持）+ `ImageTranscoder`（长边压缩 / BMP 转码）+ 视频真实现。
+  - 扫描件（无文本层）**不做 OCR**，只给出明确原因；OCR 不在 `docs/PROMPT.md` 本次范围内。
+  - 未抽取 PDF 的书签/目录、表单字段、注释与批注；PDFium 未启用的构建仍可编译但 pdf 解析降级（属**预期行为**，非缺陷）。
+  - 按要求暂不提交 git（远端仓库信息待补充，PR 后续统一处理）。
+- **出处**：
+  - PDFium 官方头文件与 API（`FPDF_InitLibrary` / `FPDF_LoadMemDocument64` / `FPDF_GetPageCount` / `FPDF_LoadPage` / `FPDF_ClosePage` / `FPDF_GetLastError` 及错误码 `FPDF_ERR_*`）：https://pdfium.googlesource.com/pdfium/+/refs/heads/main/public/fpdfview.h
+  - PDFium 文本层 API（`FPDFText_LoadPage` / `FPDFText_CountChars` / `FPDFText_GetText`（缓冲区需 `count + 1`、返回值含终止 NUL）/ `FPDFText_ClosePage`）：https://pdfium.googlesource.com/pdfium/+/refs/heads/main/public/fpdf_text.h
+  - PDFium 许可证（**BSD-3-Clause**，允许随二进制再分发）：https://pdfium.googlesource.com/pdfium/+/refs/heads/main/LICENSE
+  - 预编译产物来源与版本（`bblanchon/pdfium-binaries`，Windows x64 包内为 `bin/pdfium.dll` + `lib/pdfium.dll.lib` + `include/`）：https://github.com/bblanchon/pdfium-binaries
+
+### 2026-10-20 ｜ v0.2.5 资料库 / RAG · M3-b：Office 三件套解析（docx / xlsx / pptx，零新增第三方依赖）｜ 状态：待验收
+- **阶段**：阶段二（资料库 / RAG · 模块 M3-b / M3 拆 4 小步的第 2 步）
+- **负责人**：开发 Agent（待补充）
+- **分支 / PR**：`v0.2.5`
+- **交付内容**：
+  - **新增 `core/library/extract/OfficeXmlUtils.{h,cpp}`**：Office 解包工具，**自研最小 ZIP 读取器**。
+    - `OfficeZipArchive`：整包读入 → **从尾部回溯 EOCD**（签名 `0x06054b50`，并校验「注释长度 + 22 必然到文件尾」以避免误命中数据区同名字节串）→ 遍历**中央目录**（`0x02014b50`）建立条目表 → 取条目时按**本地头**（`0x04034b50`）重算数据起点（本地头与中央目录的额外字段长度可能不同）。
+    - 仅支持本次范围的 **stored(0) / deflate(8)**，遇到其它压缩方式给出明确错误；**不处理 ZIP64**（本次范围外）。
+    - 压缩流走 **Qt 自带的 zlib**：`#include <QtZlib/zlib.h>`，Qt 内部已把符号前缀化为 `z_*`（`z_inflateInit2` / `z_inflate` / `z_inflateEnd`），由 `Qt6Core` 导出 —— 因此**不引入任何新的第三方依赖**，也不用 Qt 私有 API。
+    - 大小上限沿用 `kMaxExtractBytes`；**只读不写**，绝不修改用户原始 Office 文件。
+    - 附带 `officeElementName()` / `officeAttribute()`：按**本地名**匹配（`w:p` → `p`、`r:id` → `id`），因此**无论是否开启命名空间处理都能稳定命中 OOXML 元素**；`collapseXmlWhitespace()` 统一折叠空白。
+  - **新增 `DocxExtractor`**（`docx`）：解 `word/document.xml`，按**段落**产出片段（`loc_kind = para`，定位串「第 N 段」）；表格按**行**产出片段、单元格以 ` | ` 连接（保留行列含义）。
+    - **只收集 `<w:t>` 内字符**：域代码（`w:instrText`）与修订删除文本（`w:delText`）不会混入正文。
+    - 空段落（`<w:p/>`）不产出片段；单张表格行内的 `w:p` 不会误当作正文段落。
+  - **新增 `XlsxExtractor`**（`xlsx`）：解 `xl/workbook.xml` + `xl/_rels/workbook.xml.rels` + `xl/sharedStrings.xml` + `xl/worksheets/sheetN.xml`。
+    - 按 `workbook.xml` 中 `<sheet>` 的**出现顺序**逐表处理（即用户看到的表序）；关系路径支持包内绝对（`/xl/...`）与相对（`worksheets/...`，含 `..` 归一）两种写法。
+    - 单元格取值覆盖 **共享字符串（`t="s"`）/ 内联字符串（`t="inlineStr"`）/ 公式结果（`t="str"`）/ 数值（无 `t`）**；**按列字母定位**，因此中间空列不会被挤掉（列对齐保留）。
+    - 转 **Markdown 表格**（与 CSV 口径一致：首个非空行为表头、每片段最多 `kTableRowsPerSegment` 行、每片段重复表头）；定位 `loc_kind = sheet` + `loc_sheet` + `loc_row_from/to`，定位串形如「预算表 第 2-21 行」，行号取**工作表真实行号**（`row/@r`）。
+    - 单表读取失败**不中断整册**（记入待报告列表）；若全部工作表都读不出则明确报错。
+  - **新增 `PptxExtractor`**（`pptx`）：按 `ppt/slides/slideN.xml` 逐页抽取，每页一个片段；段落以换行连接，`loc_kind = slide` + `loc_page`，定位串「第 N 张幻灯片」。
+    - **按文件名中的数字排序**（`slide2.xml` 排在 `slide10.xml` 之前），避免字符串排序导致顺序错乱；无文本的幻灯片与单页损坏不产片段、不中断整册。
+  - **`ExtractorRegistry` 登记新解析器**（docx / xlsx / pptx），上层调用方式不变（仍只用 `forPath()`）。
+  - **小重构**：把「表格每片段行数」提为公共常量 `kTableRowsPerSegment`（`Extractor.h`），CSV 与 XLSX 共用；`markdownCell/markdownRow/markdownSeparator` 提为 `Extractor.h` 内联工具，两个表格解析器共用一份实现，避免口径漂移。
+  - **测试 `tests/tst_extractors.cpp` 扩充到 15 用例（含 init/cleanup 共 17 项）**：新增一个**测试专用 ZIP 写入器**（用 Qt 自带 zlib 现场生成**合法 ZIP**，支持 stored 与 deflate 两种方式并写真实 CRC32），因此**无需预置任何二进制夹具**即可覆盖解压路径。
+- **自测**：Debug 构建通过（零编译告警）；`ctest -C Debug` **17/17** 通过（M1/M2/M3-a 无回归）；`MeowAi.exe --smoke-test` 退出码 **0**。
+  - **docx**：`docxExtractsParagraphsAndTableRows` —— **同一份内容分别以 stored 与 deflate 两种方式打包**，两种都解出 5 个片段，「第 1 段 = 工程概况」「第 3 段 = 项目 | 金额」「第 4 段 = 土建 | 1200万」（表格行语义保留）、空段落不产片段。
+  - **xlsx**：`xlsxExtractsSheetRowsWithLocators` —— 共享字符串表头（名称/预算）、内联字符串与数值单元格、25 条数据行 → 两片段「预算表 第 2-21 行」「预算表 第 22-26 行」；**稀疏行 `A24` 留空**仍保留列对齐（断言 `|  | 240 |`）。
+  - **pptx**：`pptxExtractsSlidesInNumericOrder` —— 夹具故意含 `slide10.xml`，断言第 3 片为「第十页」（**数字排序而非字符串排序**），`loc_page` 递增。
+  - **健壮性**：`officeBrokenContainerReportsError` —— 非 ZIP 内容报「不是有效的 Office 文件」；合法 ZIP 缺 `word/document.xml` 报「缺少 word/document.xml」；无幻灯片报「未找到幻灯片」。三种情况**都不崩溃、都有中文明确错误**。
+  - **注册表**：`registryRoutesByExtension` 更新为 docx/xlsx/pptx 命中；`pdf` 与 `image` 仍**明确返回 `nullptr`**（M3-c / M3-d 待补，上层须给「暂不支持」提示）。
+- **遗留 / 待定**：
+  - **M3-c**：`pdf`（PDFium，按用户决策**本地放置 + 仓库忽略**：放 `third_party/pdfium/`、加 `.gitignore`、附固定 tag 的抓取脚本；CMake 检测到才启用，缺失时降级并明确提示）。
+  - **M3-d**：`ImageCaptionExtractor`（图片走视觉模型，属 providers 层）+ `ImageTranscoder`（长边压缩 / BMP 转码）+ 视频真实现。
+  - docx 的页眉页脚、批注、脚注暂不抽取；xlsx 的公式原始表达式、图表、批注暂不抽取；pptx 未按 `presentation.xml` 的 `sldIdLst` 排序（按文件名数字）；以上均在本次范围外，已在代码注释标注。
+  - 按要求暂不提交 git（远端仓库信息待补充，PR 后续统一处理）。
+- **出处**：
+  - ZIP 格式规范（本地头 `0x04034b50`、中央目录 `0x02014b50`、结束记录 `0x06054b50`，字段偏移与「本地头额外字段长度可能与中央目录不同」）：https://pkware.cachefly.net/webdocs/casestudies/APPNOTE.TXT
+  - zlib 手册（`inflateInit2` 的 `windowBits = -15` 表示**原始 deflate 流**；`zlib.h` 中 `z_inflateInit2` 为 Qt 前缀化后的等价入口）：https://zlib.net/manual.html#Basic
+  - Qt 自带 zlib（`QtZlib/zlib.h`，符号前缀 `z_` 由 `Qt6Core` 导出，无需额外依赖）：https://doc.qt.io/qt-6/third-party-licenses.html
+  - Qt XML 流式解析（`QXmlStreamReader` 的 `qualifiedName()/name()/attributes()` 与命名空间处理）：https://doc.qt.io/qt-6/qxmlstreamreader.html
+  - OOXML 文本结构（Word 正文 `word/document.xml` 的 `w:p`/`w:t`/`w:tbl`、`w:instrText` 域代码、`w:delText` 修订文本）：https://learn.microsoft.com/en-us/office/open-xml/word/paragraphs
+  - OOXML 共享字符串与工作表（`xl/sharedStrings.xml` 的 `si`/`t`、`xl/workbook.xml` 的 `sheets/sheet`、关系表 `xl/_rels/workbook.xml.rels` 的 `Relationship`、`xl/worksheets/sheetN.xml` 的 `row/@r` 与 `c/@r`/`c/@t`）：https://learn.microsoft.com/en-us/office/open-xml/spreadsheet/how-to-parse-a-spreadsheet
+  - OOXML 幻灯片（`ppt/slides/slideN.xml` 的 `a:p`/`a:t`）：https://learn.microsoft.com/en-us/office/open-xml/presentation/structure-of-a-presentationml-document
+  - 深研结论：**不引入第三方 ZIP/Office 库**（既有 Qt 自带 zlib 足够），保持「零新增依赖 + 不用 Qt 私有 API」；三个解析器统一遵守 `Extractor` 契约（本地同步、失败给中文明确错误、片段必带定位），与 M3-a 的分块口径（首行表头、20 行一段、每段重复表头）保持一致。
+
+### 2026-10-20 ｜ v0.2.5 资料库 / RAG · M3-a：解析层骨架 + 纯文本类解析器（plain / csv / json）｜ 状态：待验收
+- **阶段**：阶段二（资料库 / RAG · 模块 M3-a / M3 共拆 4 小步：a 注册表与纯文本类、b Office 三件套、c PDF(PDFium)、d 图片 caption 与视频预留）
+- **负责人**：开发 Agent（待补充）
+- **分支 / PR**：`v0.2.5`
+- **交付内容**：
+  - **新增 `core/library/extract/Extractor.h`**：解析层公共契约。
+    - `LocatorKind`（`Para/Row/Sheet/Page/Slide/Json/Image/None`）+ `locatorKindName()` 内联映射 —— **落库字符串与 `chunks.loc_kind` 的取值一一对应**，避免各解析器各写一套字符串。
+    - `ExtractedSegment`：**强制携带定位信息**（`locLabel` 人可读定位串 + `locPage/locSheet/locRowFrom/locRowTo`），否则引用来源无法向用户核对（DoD #2）。
+    - `ExtractionResult{ok, segments}`；`Extractor` 接口 = `id()` / `supports(kind, ext)` / `extract(path, result, error)`，**只做本地同步解析、绝不发起网络请求**，失败一律 `false + error`、不抛异常。
+    - `kMaxExtractBytes = 64MB` 单次解析上限 + 共用读取函数 `readLibraryTextFile()`：校验存在/普通文件/大小 → **去 UTF-8 BOM** → UTF-8 优先、出现替换字符时回落本地编码（中文 Windows 即 GBK）→ `\r\n`、孤立 `\r` **统一归一为 `\n`**。
+  - **新增 `core/library/extract/ExtractorRegistry.{h,cpp}`**：注册式路由——`add(std::unique_ptr<Extractor>)`（**注册表独占所有权**，同 id 后注册者覆盖）、`forPath()`（按 `LibraryFileKinds` 类别 + 扩展名匹配）、`ids()`、`extract()` 便捷入口（**无匹配格式时给出「暂不支持该格式」明确错误**，不留空指针崩溃）。
+  - **新增 `PlainTextExtractor`**（`txt / md / markdown / log`）：按**空行分段**（Markdown 的自然块边界），每段一个片段、定位串「第 N 段」；**长度切分与重叠留给 M4 的 `ChunkSplitter`**，本层只负责「语义块 + 定位」。
+  - **新增 `CsvExtractor`**（`csv / tsv`）：**RFC 4180 风格解析**（引号包裹、引号内的分隔符与换行、`""` 转义、字段起始处才认引号），转 **Markdown 表格**（首行即表头、每片段重复表头以保证单独可读、列数按块内最大值补齐、单元格内 `|` 转义为 `\|`、换行转 `<br>`）；每片段最多 20 条数据行，定位串按**文件真实行号**标注「第 12-18 行」（表头为第 1 行）。
+  - **新增 `JsonExtractor`**（`json`）：嵌套结构**展平为「路径: 值」语义行**（保留键路径含义），再按**顶层分支**（根对象每个键 / 根数组每个元素）分组为片段，定位串即该分支的 JSON 路径（`$.server.port`、`$[3].name`）；空对象/空数组不产生片段；超过 `kMaxLinesPerSegment = 20000` 时截断并在片段尾部**明确标注**，不静默丢数据。
+  - **新增 `VideoExtractor`（预留注册点）**：`supports(kind == Video)` 命中，`extract()` 返回 `false` + 「视频解析本次未实现（仅预留注册点）」。入库侧 `LibraryManager` 仍把视频登记为 `unsupported`、不进入索引流程；本类保证注册表类型覆盖完整，后续实现视频解析只需替换其内部。
+  - **新增测试 `tests/tst_extractors.cpp`（11 用例 / 13 含 init+cleanup）**；`CMakeLists.txt` 与 `tests/CMakeLists.txt` 接入新源码与测试目标。
+- **自测**：Debug 构建通过（零编译告警）；`ctest -C Debug` **17/17** 通过（M1/M2 的 16 项无回归）；`MeowAi.exe --smoke-test` 退出码 **0**。
+  - **定位元数据用例**：`plainTextSplitsParagraphsWithLocators`（段落序号 + `loc_kind=para` 落库串）、`csvConvertsToMarkdownTableWithRowRanges`（`第 2-21 行` / `第 22-26 行`，Markdown 表头与分隔行、单元格 `|` 已转义）、`jsonFlattensBranchesWithPathLabels`（`$.server` / `$.tags` 两段，行内容为完整路径 + 值）。
+  - **健壮性用例**：`plainTextHandlesBomCrlfAndEmptyFile`（BOM 去掉、CRLF 归一、空文件合法且零片段）、`plainTextDoesNotDropNonUtf8Content`（非 UTF-8 内容回落本地编码、**不留替换字符**）、`csvKeepsQuotedDelimiterAndNewlineInOneField`（引号内的逗号与换行不拆列拆行）、`jsonInvalidContentReportsParseError`（坏 JSON → 明确错误 + 不崩）。
+  - **注册表用例**：`registryRoutesByExtension`（md→plain、csv/tsv→csv、json→json、mp4→video；**pdf/xlsx 本批明确返回 `nullptr`**，即 M3-b/M3-c 的待补清单）、`registryIsOverridableBySameId`（同 id 覆盖且只保留一份）、`videoIsReservedAndReportsNotImplemented`、`missingFileAndUnknownFormatFailWithMessage`。
+- **遗留 / 待定（M3 后续小步）**：
+  - **M3-b**：`docx / xlsx / pptx` —— 需先落 `OfficeXmlUtils`（自研最小 ZIP 读取器，**走 Qt 自带的 `QtZlib`（符号已前缀化为 `z_inflate` / `z_inflateInit2_`，由 `Qt6Core` 导出）**，零新增第三方依赖）+ `QXmlStreamReader` 抽文本；定位分别为段落 / 工作表名 + 行号 / 幻灯片序号。
+  - **M3-c**：`pdf` —— 按已锁方案接 **PDFium**（BSD-3-Clause，`FPDFText_LoadPage / CountChars / GetText` 抽文本层，页码天然可得；扫描件渲染页 → 视觉模型为可选且可一键关闭，关闭时标 `no_text_layer` 并明确提示）。`bblanchon/pdfium-binaries` 最新 tag `chromium/8111` 已确认可获取，**待用户确认落地方式**（vendored 进仓库 / 可选构建降级）。
+  - **M3-d**：`ImageCaptionExtractor`（图片走视觉模型生成 caption，属 providers 层，需 `ImageTranscoder` 做长边压缩与 BMP 转码）+ 视频真实现。
+  - 因此本批 `forPath()` 对 `pdf/docx/xlsx/pptx/image` 尚无解析器：上层（M4 索引器）需把「无匹配解析器」落到 `status = needs_* / unsupported` 并给出明确提示，不得当作崩溃。
+  - 按要求暂不提交 git（远端仓库信息待补充，PR 后续统一处理）。
+- **出处**：
+  - Qt 文件读取与信息（`QFile::readAll`、`QFileInfo::size/isFile`）：https://doc.qt.io/qt-6/qfile.html 、https://doc.qt.io/qt-6/qfileinfo.html
+  - Qt 字符串编码与替换字符（`QString::fromUtf8` 对非法序列替换为 `QChar::ReplacementCharacter`、`QString::fromLocal8Bit` 回落本地编码）：https://doc.qt.io/qt-6/qstring.html#fromUtf8 、https://doc.qt.io/qt-6/qchar.html#ReplacementCharacter
+  - Qt 正则分段（`QRegularExpression` 用于空行切分）：https://doc.qt.io/qt-6/qregularexpression.html
+  - Qt JSON 解析与错误（`QJsonDocument::fromJson(QJsonParseError*)` 带偏移量、`QJsonValue::type()` 区分类型）：https://doc.qt.io/qt-6/qjsondocument.html#fromJson 、https://doc.qt.io/qt-6/qjsonparseerror.html
+  - RFC 4180（CSV 的引号包裹、引号内分隔符与换行、`""` 转义规则）：https://www.rfc-editor.org/rfc/rfc4180
+  - 深研结论：**解析器契约与文件清单严格按 `docs/PROMPT.md` §3 的已锁定方案落地**；本层只做「本地语义块 + 定位」，长度切分/重叠归 M4、网络（caption/embedding）归 providers，保持分层边界不杂糅。
+
+### 2026-10-20 ｜ v0.2.5 资料库 / RAG · M2：core 层（LibraryManager 文件来源 + CollectionManager）｜ 状态：待验收
+- **阶段**：阶段二（资料库 / RAG · 模块 M2 / 共 8 个模块）
+- **负责人**：开发 Agent（待补充）
+- **分支 / PR**：`v0.2.5`
+- **交付内容**：
+  - **新增 `core/library/LibraryFileKinds.{h,cpp}`**：文件类别判定与命名（`LibraryKind`：Text / Image / Video / Unknown）。文本集 = `txt/md/markdown/csv/tsv/json/log/pdf/docx/xlsx/pptx`；图片集 = `jpg/jpeg/png/webp/gif/bmp`；视频集 = `mp4/mov/mkv/avi/webm/m4v`。用途：上传导入与文件夹扫描共用同一套「可索引 / 仅登记 / 直接跳过」判定，**UI 与核心层不各自硬编码扩展名**。
+  - **重写 `core/library/LibraryManager.{h,cpp}`（覆盖阶段一空骨架）**：资料库**文件来源**的两种语义严格分离。
+    - **上传导入**：把文件**复制**进 `<AppData>/library/`（`QFile::copy` + **大小校验**，校验失败即清理未完成副本），**绝不移动、绝不覆盖原文件**；同名自动改名；原路径只记在 `origin_path` 里**仅作溯源、永不删除**。登记失败则回滚已复制副本，不留孤儿文件。
+    - **关联文件夹（快照）**：只对用户目录建**索引引用**，**不复制、不监视**；扫描（`QDirIterator` 递归、`NoSymLinks`）后落库，上限 `kMaxSnapshotFiles = 5000`（超出**直接中止、不做部分写入**，避免误关联整个磁盘）。**先扫描后落库**：文件夹不可读 / 文件过多时不留半成品关联记录。
+      - 快照统计（`FolderSnapshotResult`）：`added` / `unchanged` / `markedStale`（内容变更）/ `missing`（磁盘已消失，**只标记不删除**）/ `unsupported`（视频：**登记但不索引**）/ `skipped`（扩展名不支持：完全不入库）。
+      - **手动重建**：`rebuildFolder` 由用户触发，识别新增 / 变更（标记 `stale`）/ 缺失（标记 `stale`），**全程只更新记录与状态，不删任何磁盘文件**；重建失败会把关联状态写为 `failed` 并留下错误文本，便于 UI 提示。
+    - **删除安全语义（红线）**：`isManagedCopy()` 路径前缀校验是删除的**唯一放行条件**——只有 `sourceKind == "upload"` 且确属我们复制进库内目录的副本才允许 `QFile::remove`；关联文件夹里的用户文件与上传时的**原文件永不触碰**。库内副本清理失败只 `qWarning`（索引已移除、磁盘留残），不阻断操作。
+    - 内容指纹 `contentHash`：≤ 8MB 取完整 `sha256:`；大文件退化为 `sz-mtime:size:mtime` 代理值，避免每次快照对上百 MB 文件做全量哈希。
+  - **新增 `core/library/CollectionManager.{h,cpp}`**：小库（命名库）管理——列表 / 新建 / 改名 / 删除，以及文件与库的多对多归库关系（`addFileToCollection` / `removeFileFromCollection` / `collectionsOfFile`）。
+    - `removeCollection()` 三阶段：① 先解除该库下**全部关联文件夹**；② 该库下**不再归属任何小库**的文件记录才移除索引（upload 类顺带清理库内副本，folder 类只删记录）；③ 删除库记录（归库关系与快照行由数据库级联清理）。
+  - **`storage/LibraryStore` 增补**：`filesByFolderLink(folderLinkId)`（快照重建与解除关联需要按快照取文件记录），M1 未交付该方法。
+  - **新增测试 `tests/tst_librarymanager.cpp`（10 项 / 12 含 init/cleanup）**；`CMakeLists.txt` 与 `tests/CMakeLists.txt` 接入新源码与测试目标。
+- **自测**：Debug 构建通过（零编译告警）；`ctest -C Debug` **16/16** 通过（M1 的 15 项无回归）；`MeowAi.exe --smoke-test` 退出码 **0**。
+  - **安全红线用例**：`removeFileRecordRemovesUploadCopyOnly`（移除上传记录后**库内副本被清理、用户原文件内容一致**；folder 类记录移除后**磁盘文件原样保留**）、`removeCollectionKeepsUserFilesOnDisk`（删除小库后**用户磁盘文件全部保留**、共用文件的其它库归属保留）、`unlinkFolderKeepsUserFilesAndDetachesSharedRecords`（解除关联后用户文件仍在、共用记录脱离快照但保留）。
+  - **来源语义用例**：`importCopiesIntoLibraryAndKeepsOriginal`（复制入库、原文件不动、同名改名）、`importRejectsMissingUnknownAndManagedCopy`（不存在 / 未知扩展名 / 已在库内均给出中文明确错误）、`importFilesPartialFailureReportsAndKeepsSuccess`（部分失败时成功项仍可用）、`folderSnapshotRegistersKindsAndSkipsUnknown`（视频只登记不索引、未知扩展名不入库）、`folderRebuildDetectsAddedChangedMissing`（重建识别新增/变更/缺失且不删盘上文件）、`linkFolderRejectsDuplicateAndMissingRoot`（跨库重复关联被拒、失败不留半成品）。
+- **语义决策（需用户确认 / 可否决）**：
+  - ① **解除文件夹关联**：快照文件会**从该小库撤出**（记录同时脱离快照）；若该文件仍归属其它小库，则**保留记录、仅脱离本快照**。即「解除关联」= 该文件夹的文件不再属于本库。
+  - ② **同一物理文件夹不允许跨库重复关联**（给中文明确错误并提示改用「加入小库」）。理由：一个文件记录只挂一个快照，否则「快照重建 / 解除关联」对共用文件会产生归属歧义；需要跨库的重复内容请用「加入小库」。
+- **遗留 / 待定**：
+  - `CollectionManager` 的「删除小库」不删除**库内副本以外的任何东西**；`removeCollection` 中「先解除文件夹」的顺序保证不产生孤儿快照。
+  - 视频本次只在库中**可见**、状态标记 `unsupported`，不解析不索引（M3 的 `VideoExtractor` 仅预留）。
+  - 按要求暂不提交 git（远端仓库信息待补充，PR 后续统一处理）。
+- **出处**：
+  - Qt 文件与目录遍历（`QDirIterator` 递归 + `NoSymLinks`、`QDir::cleanPath`、`QFileInfo`）：https://doc.qt.io/qt-6/qdiriterator.html
+  - Qt `QFile::copy` 语义（**不覆盖已存在目标**，同名需自行改名）：https://doc.qt.io/qt-6/qfile.html#copy
+  - Qt 加密哈希（`QCryptographicHash::Sha256` + `addData(QIODevice*)` 流式哈希，用于内容指纹）：https://doc.qt.io/qt-6/qcryptographichash.html
+  - 深研结论：**两种来源的语义差异（复制 vs 引用）与「绝不删用户原文件」的红线严格按 `docs/PROMPT.md` §0/§2 的已锁定口径落地**；`isManagedCopy()` 作为删除前的唯一放行条件，与 M1 的 `removeFile` / `removeFolderLink` 职责边界清晰（存储层不做删除磁盘文件的决策）。
+
+### 2026-10-20 ｜ v0.2.5 资料库 / RAG · M1：storage 层（schema v2 + LibraryStore + LibraryConfigStore）｜ 状态：待验收
+- **阶段**：阶段二（资料库 / RAG · 模块 M1 / 共 8 个模块）
+- **负责人**：开发 Agent（待补充）
+- **分支 / PR**：`v0.2.5`
+- **交付内容**：
+  - **`storage/Database.{h,cpp}` · schema v2 前向幂等迁移**：新增 8 张资料库表的 DDL（`collections` / `library_files` / `file_collections` / `folder_links` / `chunks` / `chunk_vectors` / `citations` / 虚拟表 `chunk_fts`）+ 唯一索引与查询索引。**v1 的会话历史表一行未动**，迁移逐版本增量执行、全部 `IF NOT EXISTS`，重复调用（每次启动）幂等。
+    - **FTS5 能力探测与降级**：先 `SELECT sqlite_compileoption_used('ENABLE_FTS5')`，失败再扫 `PRAGMA compile_options`；探测结果经 `Database::fts5Available()` 暴露给上层。虚拟表按 `trigram` → 默认分词器 → 关闭 FTS **三级降级**创建，任一失败都不会让整个 schema 迁移失败（关闭时关键词检索改走 LIKE）。
+    - FTS 索引表与版本号**解耦**：已是 v2 的库若缺 `chunk_fts`（迁移时 FTS 尚不可用）会自动补建，避免上层的 FTS 写入打在不存在的表上。
+    - `m_fts5Available` 在版本提前返回**之前**完成探测，保证「库已是最新版本」的常见路径下能力标志依然正确。
+  - **新增 `storage/LibraryStore.{h,cpp}`**：schema v2 各表的**纯 CRUD**（无业务判断、无 UI 语义），所有失败路径返回 `false + error` 不抛异常。
+    - 小库：列表 / 按名查询 / 新建（重名给出中文明确错误）/ 改名 / 删除。
+    - 文件：列表 / 库内列表 / 按 id、按 `source_path` 查询 / 新增（来源路径重复给出中文明确错误）/ 整行更新 / 删除记录。
+    - 归库关系：多对多关联（`INSERT OR IGNORE`，**重复关联幂等**）/ 解除关联 / 查所属小库。
+    - 关联文件夹快照：新增 / 写快照（时间 + 文件数 + 状态）/ 列表 / 删除关联。
+    - 片段：`replaceChunks` 在**单个事务**内「清旧片段 + 清对应 FTS 行 → 插新片段 + 同步 FTS → 回填 `library_files.chunk_count`」，失败整体回滚（重新切块不残留、不重复）；`chunksOfFile` / `chunksByIds` / `chunkById` / `chunksInOrdinalRange`（邻居扩展用）。
+    - 关键词检索：`searchChunkIds(query, collectionIds, limit)` —— FTS5 走 `MATCH` + `bm25()` 排序（查询串按 FTS5 语法整体加引号转义，trigram 至少 3 字符）；不足 3 字符或 FTS 不可用则降级 `LIKE`（`%` `_` `\` 全部转义 + `ESCAPE`）；`MATCH` 因任意标点失败时再降级 LIKE，不让检索整体报错；支持按小库过滤。
+    - 引用来源：写入 / 按消息查询（按 `rank` 升序）/ 按消息、按会话清理（citations 无外键，删除消息与会话时必须显式清理，否则留脏数据）。
+  - **新增 `storage/LibraryConfigStore.{h,cpp}`**：只读写 `config.json` 的 `library` 段（模式对标 `AiConfigStore`：读现有 JSON → 只替换本段 → `QSaveFile` 原子写）。**其他段（ai / theme / personalization / web）一律原样保留**；**绝不保存密钥**（embedding / caption 的 Key 只进 `storage/SecureStore`）。默认值即 PROMPT 锁定口径：`topK=6` / `perFileLimit=2` / `tokenBudget=2000` / `similarityThreshold=0.30` / `neighborRadius=1` / `ftsFallback=true` / `chunkSize=700` / `chunkOverlap=120`，外加 `enabled`、`consentGiven`+`consentAt`、`embedding{providerId,modelId,dimensions,batchSize}`、`caption{providerId,modelId,maxEdge,maxTokens,promptProfile}`、`mountedCollections`。
+  - **新增测试**：`tests/tst_librarystore.cpp`（13 项）、`tests/tst_libraryconfig.cpp`（6 项）、`tests/tst_storage.cpp` 增 2 项（v2 建表 + 迁移幂等且不删 v1 表）。`CMakeLists.txt` / `tests/CMakeLists.txt` 接入新源码与测试目标。
+- **自测**：Debug 构建通过（无编译告警）；`ctest -C Debug` **15/15** 通过（原 13 项无回归 + 新增 2 个测试目标）。
+  - **安全红线专项用例**：`removingCollectionKeepsFilesAndOtherMembership`（删除小库后文件记录与其他库归属都保留）、`removingFileRecordNeverTouchesDiskFile`（磁盘真实文件内容逐字节比对，删除索引后**原文件依然存在且内容一致**）。
+  - **降级专项用例**：`unavailableWithoutDatabase`（无数据库时全部接口返回失败 + 中文错误，不崩）、短关键词（2 字符）走 LIKE 召回、`%` 通配符被转义、空关键词给明确错误。
+  - **切片一致性用例**：`replaceChunksIsAtomicAndIdempotent`（含「重新切块不残留」「清空片段合法」「非法 fileId 被拒」）、`neighborRangeAndChunkById`（含边界不越界）。
+  - 实测本机 Qt 自带 SQLite **FTS5 可用**（`fts5Available() == true`，走 trigram + bm25 路径；LIKE 降级路径亦被用例覆盖）。
+- **遗留 / 待定**：
+  - 本次**只交付 storage 层**，尚无 core 层调用方；`chunk_vectors` 的读写归 M4（`storage/SqliteVectorIndex`），故 `LibraryStore` 本批不含向量 CRUD（表已建好）。
+  - `folder_links` 之下文件索引记录的连带清理**由 core 层（M2）决定**，存储层只提供 `removeFolderLink` 与 `removeFile` 两个原子操作。
+  - 应用可执行文件 `MeowAi.exe` 本次**未重新链接**（用户正在运行的实例占用该文件，LNK1168），库与全部测试目标均已重建；待用户关闭实例后补一次整体构建。
+  - 按要求暂不提交 git（远端仓库信息待补充，PR 后续统一处理）。
+- **出处**：
+  - SQLite FTS5 扩展（`fts5` 虚拟表、`MATCH`、`bm25()`、`trigram` 分词器自 3.34 起支持中文子串检索、`tokenize='trigram'`）：https://www.sqlite.org/fts5.html
+  - SQLite 编译期选项探测（`sqlite_compileoption_used()` / `PRAGMA compile_options`，用于 FTS5 能力探测与降级）：https://www.sqlite.org/pragma.html#pragma_compile_options
+  - SQLite 外键级联与事务（`ON DELETE CASCADE` 用于归库关系与片段自动清理；`PRAGMA foreign_keys` 为**连接级**开关，需每次连接显式开启）：https://www.sqlite.org/foreignkeys.html
+  - SQLite `LIKE` 转义语义（`ESCAPE` 子句 + `%`/`_` 通配符需转义）：https://www.sqlite.org/lang_expr.html
+  - Qt SQL 驱动（`QSqlDatabase::transaction/commit/rollback`、`QSqlQuery::lastInsertId`、驱动绑定空值写 NULL）：https://doc.qt.io/qt-6/qsqldatabase.html
+  - Qt 原子写文件（`QSaveFile`：写临时文件后 `commit()` 原子替换，避免配置写坏）：https://doc.qt.io/qt-6/qsavefile.html
+  - 深研结论：**8 张表 DDL 与配置项默认值严格按 `docs/PROMPT.md` §4/§5 的已锁定方案落地**，未自行增删字段；`chunk_fts` 用**独立 FTS5 表**（非 `content=` 外部内容表），故由 `LibraryStore` 在片段增删时**显式同步**索引行（虚拟表不支持外键级联）。
+- **补充（M1 收尾，状态变更，原条目保留）**：经用户确认后结束占用构建产物的运行实例，**整体重建完成**（`MeowAiLib` / `MeowAi.exe` / 全部 16 个测试目标，零编译告警），`MeowAi.exe --smoke-test` 退出码 **0**，`ctest -C Debug` 复核 **15/15** 通过。上条「`MeowAi.exe` 未重新链接」的待定项**已解除**。
+
 ### 2026-10-20 ｜ v0.2.4 联网检索改造：B 形态（模型自主联网）+ DeepSeek 零配置 + UI 弱化 ｜ 状态：待验收
 - **阶段**：阶段二（AI 接入增强 · 联网检索改造）
 - **负责人**：开发 Agent（待补充）

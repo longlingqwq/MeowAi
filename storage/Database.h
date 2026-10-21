@@ -26,9 +26,14 @@ public:
     /// 建立最小 schema；阶段二再按模块扩展表结构
     bool ensureSchema(QString *error);
 
+    /// FTS5 全文索引是否可用（`ensureSchema` 调用后有效）。
+    /// 不可用时资料库的关键词检索由 LibraryStore 降级为 LIKE 扫描。
+    bool fts5Available() const;
+
     QSqlDatabase handle() const;
 
 private:
     QString m_connectionName;
     bool m_open = false;
+    bool m_fts5Available = false;
 };

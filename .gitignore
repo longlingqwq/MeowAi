@@ -49,12 +49,20 @@ Desktop.ini
 .DS_Store
 
 # ---- Local runtime data (never commit user data) ----
-config.json
-library/
-categories/
-backups/
-assets/
+# 注意：必须锚定到仓库根目录，否则会把 core/library 等源码目录一起忽略
+/config.json
+/library/
+/categories/
+/backups/
+/assets/
+
+# ---- Local-only optional dependency (never commit, never in PR diff) ----
+# PDFium 预编译产物由 scripts/fetch-pdfium.ps1 抓取到本地；仓库内不含二进制
+third_party/pdfium/
 
 # ---- Misc / local logs ----
 aqtinstall.log
 *.log
+
+# ---- Local test/temp databases ----
+.tmpdb/

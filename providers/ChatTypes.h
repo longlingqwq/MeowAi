@@ -6,6 +6,8 @@
 #include <QList>
 #include <QMetaType>
 #include <QString>
+#include <QStringList>
+#include <QVector>
 
 /**
  * AI 请求 / 响应的公共数据结构。

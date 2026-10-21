@@ -305,10 +305,10 @@ void ChatHistoryModel::appendUserMessage(const QString &text)
     }
 }
 
-void ChatHistoryModel::beginAssistantMessage()
+qint64 ChatHistoryModel::beginAssistantMessage()
 {
     if (!available() || m_conversationId == 0) {
-        return;
+        return 0;
     }
 
     MessageRecord record;
@@ -333,6 +333,7 @@ void ChatHistoryModel::beginAssistantMessage()
     endInsertRows();
 
     m_pendingMessageId = newId;
+    return newId;
 }
 
 void ChatHistoryModel::appendAssistantDelta(const QString &delta)

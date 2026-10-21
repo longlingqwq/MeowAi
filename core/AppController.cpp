@@ -3,7 +3,10 @@
 #include "core/ai/ProviderCatalog.h"
 #include "core/chat/ChatController.h"
 #include "core/chat/ChatHistoryModel.h"
+#include "core/library/LibraryController.h"
+#include "core/retriever/EmbeddingService.h"
 #include "core/retriever/NullRetriever.h"
+#include "core/retriever/RagRetriever.h"
 #include "core/skill/SkillRegistry.h"
 #include "core/theme/ThemeManager.h"
 #include "core/theme/ThemePresetManager.h"
@@ -16,8 +19,11 @@
 #include "storage/AppPaths.h"
 #include "storage/ChatStore.h"
 #include "storage/Database.h"
+#include "storage/LibraryConfigStore.h"
+#include "storage/LibraryStore.h"
 #include "storage/PersonalizationStore.h"
 #include "storage/SecureStore.h"
+#include "storage/SqliteVectorIndex.h"
 #include "storage/ThemeStore.h"
 #include "storage/WebConfigStore.h"
 
@@ -100,6 +106,36 @@ ChatHistoryModel *AppController::chatHistoryModel() const
     return m_chatHistory.get();
 }
 
+LibraryStore *AppController::libraryStore() const
+{
+    return m_libraryStore.get();
+}
+
+LibraryConfigStore *AppController::libraryConfigStore() const
+{
+    return m_libraryConfigStore.get();
+}
+
+EmbeddingService *AppController::embeddingService() const
+{
+    return m_embeddingService.get();
+}
+
+SqliteVectorIndex *AppController::vectorIndex() const
+{
+    return m_vectorIndex.get();
+}
+
+RagRetriever *AppController::ragRetriever() const
+{
+    return m_ragRetriever.get();
+}
+
+LibraryController *AppController::libraryController() const
+{
+    return m_libraryController.get();
+}
+
 void AppController::initialize()
 {
     if (!m_platform) {
@@ -175,10 +211,36 @@ void AppController::initialize()
     m_webSearch = std::make_unique<WebSearchService>(m_webSearchProvider.get(),
                                                      m_secureStore.get(), m_webConfigStore.get());
 
+    // 资料库（v0.2.5）：持久化只走 storage，embedding 请求只走 providers 的 NetworkTransport
+    m_libraryStore = std::make_unique<LibraryStore>(m_database.get());
+    m_libraryConfigStore = std::make_unique<LibraryConfigStore>(m_paths->configFile());
+    m_embeddingService = std::make_unique<EmbeddingService>();
+    m_vectorIndex = std::make_unique<SqliteVectorIndex>(m_database.get());
+    m_ragRetriever = std::make_unique<RagRetriever>(m_libraryStore.get(), m_vectorIndex.get(),
+                                                    m_embeddingService.get());
+
     // AI 接入（功能 #3 / #4）：对话控制器，Key 只从 SecureStore 读取，历史经会话模型
     m_chat = std::make_unique<ChatController>(m_secureStore.get(), m_chatHistory.get(),
                                               m_providerCatalog.get(), m_aiConfigStore.get(),
                                               m_webConfigStore.get(), m_webSearch.get());
+    m_chat->attachLibrary(m_libraryStore.get(), m_ragRetriever.get(),
+                          m_libraryConfigStore.get());
+
+    // 资料库 QML 门面（v0.2.5 · M7）：由它统一配置 embedding / caption 与挂载列表，
+    // AppController 只负责装配与把「挂载变更」同步给对话控制器
+    m_libraryController = std::make_unique<LibraryController>(
+        *m_paths, m_libraryStore.get(), m_libraryConfigStore.get(), m_embeddingService.get(),
+        m_vectorIndex.get(), m_ragRetriever.get(), m_providerCatalog.get(), m_secureStore.get(),
+        m_aiConfigStore.get(), this);
+    connect(m_libraryController.get(), &LibraryController::mountChanged, this, [this] {
+        if (!m_chat || !m_libraryController)
+            return;
+        QVariantList ids;
+        const LibraryConfigData current = m_libraryConfigStore->load();
+        for (qint64 id : current.mountedCollections)
+            ids.append(id);
+        m_chat->setMountedCollections(ids);
+    });
 
     // 资料库检索接口仅预留：阶段一固定挂载空实现（不实现检索算法）
     m_retriever = std::make_unique<NullRetriever>();

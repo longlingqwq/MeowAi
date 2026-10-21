@@ -3,6 +3,9 @@
 
 #include <QDir>
 #include <QFile>
+#include <QSqlError>
+#include <QSqlQuery>
+#include <QStringList>
 #include <QTemporaryDir>
 #include <QtTest>
 
@@ -20,6 +23,8 @@ private slots:
     void databaseOpenRejectsEmptyPath();
     void databaseOpenFailsGracefullyOnBlockedPath();
     void databaseSchemaRoundTrip();
+    void schemaV2CreatesLibraryTables();
+    void schemaV2MigrationIsIdempotentAndKeepsV1Tables();
 };
 
 void TstStorage::ensureLayoutCreatesAllDirectories()
@@ -105,6 +110,83 @@ void TstStorage::databaseSchemaRoundTrip()
     QString closedError;
     QVERIFY(!closed.ensureSchema(&closedError));
     QVERIFY(!closedError.isEmpty());
+}
+
+void TstStorage::schemaV2CreatesLibraryTables()
+{
+    QTemporaryDir tmp;
+    QVERIFY(tmp.isValid());
+
+    Database db;
+    QString error;
+    QVERIFY2(db.open(QDir(tmp.path()).filePath(QStringLiteral("meta.db")), &error), qPrintable(error));
+    QVERIFY2(db.ensureSchema(&error), qPrintable(error));
+
+    QSqlQuery query(db.handle());
+    QVERIFY2(query.exec(QStringLiteral("SELECT name FROM sqlite_master WHERE type = 'table'")),
+             qPrintable(query.lastError().text()));
+    QStringList tables;
+    while (query.next())
+        tables.append(query.value(0).toString());
+
+    const QStringList required = { QStringLiteral("collections"), QStringLiteral("library_files"),
+                                   QStringLiteral("file_collections"), QStringLiteral("folder_links"),
+                                   QStringLiteral("chunks"), QStringLiteral("chunk_vectors"),
+                                   QStringLiteral("citations") };
+    for (const QString &table : required) {
+        QVERIFY2(tables.contains(table), qPrintable(QStringLiteral("缺少资料库表：%1").arg(table)));
+    }
+
+    // FTS 索引表是否存在，必须与探测结果一致：不可用时关键词检索降级为 LIKE
+    QCOMPARE(tables.contains(QStringLiteral("chunk_fts")), db.fts5Available());
+    qInfo("SQLite FTS5 available: %s", db.fts5Available() ? "yes" : "no (LIKE fallback)");
+
+    QSqlQuery version(db.handle());
+    QVERIFY(version.exec(QStringLiteral("SELECT value FROM meta WHERE key = 'schema_version'")));
+    QVERIFY(version.next());
+    QCOMPARE(version.value(0).toInt(), 2);
+}
+
+void TstStorage::schemaV2MigrationIsIdempotentAndKeepsV1Tables()
+{
+    QTemporaryDir tmp;
+    QVERIFY(tmp.isValid());
+
+    const QString path = QDir(tmp.path()).filePath(QStringLiteral("meta.db"));
+    QString error;
+
+    {
+        Database db;
+        QVERIFY2(db.open(path, &error), qPrintable(error));
+        QVERIFY2(db.ensureSchema(&error), qPrintable(error));
+        // 重复执行必须幂等（应用每次启动都会调用）
+        QVERIFY2(db.ensureSchema(&error), qPrintable(error));
+    }
+
+    // 重新打开同一文件：v2 已是当前版本，迁移应直接通过且能力探测仍然正确
+    Database reopened;
+    QVERIFY2(reopened.open(path, &error), qPrintable(error));
+    QVERIFY2(reopened.ensureSchema(&error), qPrintable(error));
+
+    QSqlQuery query(reopened.handle());
+    QVERIFY(query.exec(QStringLiteral("SELECT name FROM sqlite_master WHERE type = 'table'")));
+    QStringList tables;
+    while (query.next())
+        tables.append(query.value(0).toString());
+
+    // v1 的会话历史表不得因迁移被删除
+    QVERIFY(tables.contains(QStringLiteral("conversations")));
+    QVERIFY(tables.contains(QStringLiteral("messages")));
+    QVERIFY(tables.contains(QStringLiteral("message_attachments")));
+    QVERIFY(tables.contains(QStringLiteral("collections")));
+
+    // 入库可用的片段表确实可写（确保迁移不只是建了空壳）
+    QSqlQuery insert(reopened.handle());
+    QVERIFY(insert.exec(QStringLiteral("INSERT INTO library_files (display_name, source_kind,"
+                                       " source_path, kind, created_at)"
+                                       " VALUES ('a.txt', 'upload', '/tmp/a.txt', 'text', 1)")));
+    QVERIFY(insert.exec(QStringLiteral("INSERT INTO chunks (file_id, ordinal, text, created_at)"
+                                       " VALUES (1, 0, '预算表', 1)")));
 }
 
 QTEST_GUILESS_MAIN(TstStorage)

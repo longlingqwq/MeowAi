@@ -10,6 +10,23 @@
       "authStyle": "bearer",
       "extraHeaders": {},
       "validation": { "method": "models" },
+      "embedding": {
+        "available": true,
+        "models": [
+          {
+            "id": "text-embedding-3-small",
+            "displayName": "text-embedding-3-small",
+            "dimensions": 1536,
+            "isDefault": true
+          },
+          {
+            "id": "text-embedding-3-large",
+            "displayName": "text-embedding-3-large",
+            "dimensions": 3072
+          }
+        ]
+      },
+      "vision": { "captionModel": "gpt-4o" },
       "models": [
         {
           "id": "gpt-5",
@@ -62,6 +79,7 @@
         "fetchEndpoint": "https://api.deepseek.com/v1/tools/fetch",
         "reuseProviderKey": true
       },
+      "vision": { "captionModel": "deepseek-flash" },
       "models": [
         {
           "id": "deepseek-v4-pro",
@@ -99,6 +117,18 @@
       "authStyle": "bearer",
       "extraHeaders": {},
       "validation": { "method": "chat-minimal" },
+      "embedding": {
+        "available": true,
+        "models": [
+          {
+            "id": "text-embedding-v4",
+            "displayName": "text-embedding-v4",
+            "dimensions": 1024,
+            "isDefault": true
+          }
+        ]
+      },
+      "vision": { "captionModel": "qwen3-vl-plus" },
       "models": [
         {
           "id": "qwen3.8-max",
@@ -162,6 +192,7 @@
       "authStyle": "bearer",
       "extraHeaders": {},
       "validation": { "method": "models" },
+      "vision": { "captionModel": "kimi-k3" },
       "models": [
         {
           "id": "kimi-k3",
@@ -193,6 +224,18 @@
       "authStyle": "bearer",
       "extraHeaders": {},
       "validation": { "method": "chat-minimal" },
+      "embedding": {
+        "available": true,
+        "models": [
+          {
+            "id": "embedding-3",
+            "displayName": "embedding-3",
+            "dimensions": 2048,
+            "isDefault": true
+          }
+        ]
+      },
+      "vision": { "captionModel": "glm-4.6v" },
       "models": [
         {
           "id": "glm-5.3",
@@ -256,6 +299,7 @@
       "authStyle": "x-api-key",
       "extraHeaders": { "anthropic-version": "2023-06-01" },
       "validation": { "method": "models" },
+      "vision": { "captionModel": "claude-sonnet-5" },
       "models": [
         {
           "id": "claude-opus-5-5",

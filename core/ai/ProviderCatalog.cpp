@@ -302,6 +302,38 @@ bool ProviderCatalog::load(QString *error)
             }
         }
 
+        // 向量化能力（可选）：资料库用；条目非法只跳过该条并记警告
+        const QJsonObject embedding = object.value(QStringLiteral("embedding")).toObject();
+        provider.embedding.available = embedding.value(QStringLiteral("available")).toBool(false);
+        for (const QJsonValue &embeddingEntry :
+             embedding.value(QStringLiteral("models")).toArray()) {
+            const QJsonObject embeddingObject = embeddingEntry.toObject();
+            CatalogEmbeddingModel embeddingModel;
+            embeddingModel.id = embeddingObject.value(QStringLiteral("id")).toString().trimmed();
+            if (embeddingModel.id.isEmpty()) {
+                m_warnings.append(QStringLiteral("厂商 %1 下跳过缺少 id 的 embedding 模型")
+                                      .arg(provider.id));
+                continue;
+            }
+            embeddingModel.displayName =
+                embeddingObject.value(QStringLiteral("displayName")).toString(embeddingModel.id);
+            embeddingModel.dimensions =
+                embeddingObject.value(QStringLiteral("dimensions")).toInt(0);
+            embeddingModel.isDefault =
+                embeddingObject.value(QStringLiteral("isDefault")).toBool(false);
+            provider.embedding.models.append(embeddingModel);
+        }
+        if (!provider.embedding.models.isEmpty())
+            provider.embedding.available = true;
+
+        // 图片 caption 的建议视觉模型（可选）：仅作 UI 预填，不强制
+        provider.captionModel =
+            object.value(QStringLiteral("vision"))
+                .toObject()
+                .value(QStringLiteral("captionModel"))
+                .toString()
+                .trimmed();
+
         const QJsonArray models = object.value(QStringLiteral("models")).toArray();
         for (const QJsonValue &modelEntry : models) {
             const QJsonObject modelObject = modelEntry.toObject();
@@ -351,6 +383,24 @@ bool ProviderCatalog::load(QString *error)
     m_available = true;
     emit changed();
     return true;
+}
+
+QString CatalogEmbedding::defaultModelId() const
+{
+    for (const CatalogEmbeddingModel &item : models) {
+        if (item.isDefault)
+            return item.id;
+    }
+    return models.isEmpty() ? QString() : models.first().id;
+}
+
+CatalogEmbeddingModel CatalogEmbedding::model(const QString &modelId) const
+{
+    for (const CatalogEmbeddingModel &item : models) {
+        if (item.id == modelId)
+            return item;
+    }
+    return CatalogEmbeddingModel();
 }
 
 QVariantList ProviderCatalog::providerOptions() const

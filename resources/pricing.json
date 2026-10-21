@@ -1,0 +1,79 @@
+{
+  "version": 1,
+  "updatedAt": "2026-10-20",
+  "note": "资料库成本预估的参考价（只用于量级提示，不参与计费）。金额 = token ÷ 1,000,000 × 每百万 token 单价；vision 先按 tokensPerImage 折算 token。未收录的模型不估算金额，只显示 token。",
+  "embedding": [
+    {
+      "providerId": "openai",
+      "modelId": "text-embedding-3-small",
+      "perMTokens": 0.02,
+      "currency": "USD",
+      "source": "https://openai.com/index/new-embedding-models-and-api-updates/"
+    },
+    {
+      "providerId": "openai",
+      "modelId": "text-embedding-3-large",
+      "perMTokens": 0.13,
+      "currency": "USD",
+      "source": "https://openai.com/index/new-embedding-models-and-api-updates/"
+    },
+    {
+      "providerId": "qwen",
+      "modelId": "text-embedding-v4",
+      "perMTokens": 0.5,
+      "currency": "CNY",
+      "source": "https://help.aliyun.com/zh/model-studio/embedding-interfaces-compatible-with-openai"
+    },
+    {
+      "providerId": "zhipu",
+      "modelId": "embedding-3",
+      "perMTokens": 0.5,
+      "currency": "CNY",
+      "source": "https://open.bigmodel.cn/pricing"
+    }
+  ],
+  "vision": [
+    {
+      "providerId": "zhipu",
+      "modelId": "glm-4.6v",
+      "tokensPerImage": 2304,
+      "perMTokens": 4,
+      "currency": "CNY",
+      "source": "https://open.bigmodel.cn/pricing"
+    },
+    {
+      "providerId": "openai",
+      "modelId": "gpt-4o",
+      "tokensPerImage": 765,
+      "perMTokens": 2.5,
+      "currency": "USD",
+      "source": "https://platform.openai.com/docs/guides/images-vision"
+    },
+    {
+      "providerId": "qwen",
+      "modelId": "qwen3-vl-plus",
+      "tokensPerImage": 334,
+      "perMTokens": 1.6,
+      "currency": "CNY",
+      "source": "https://help.aliyun.com/zh/model-studio/models"
+    }
+  ],
+  "chat": [
+    {
+      "providerId": "openai",
+      "modelId": "gpt-4o",
+      "inputPerMTokens": 2.5,
+      "outputPerMTokens": 10,
+      "currency": "USD",
+      "source": "https://openai.com/api/pricing/"
+    },
+    {
+      "providerId": "openai",
+      "modelId": "gpt-5-mini",
+      "inputPerMTokens": 0.25,
+      "outputPerMTokens": 2,
+      "currency": "USD",
+      "source": "https://openai.com/api/pricing/"
+    }
+  ]
+}

@@ -1,5 +1,6 @@
 #pragma once
 
+#include "core/retriever/RetrievalConfig.h"
 #include "core/web/WebSearchProvider.h"
 #include "providers/AiProvider.h"
 #include "storage/AiConfigStore.h"
@@ -15,8 +16,11 @@
 #include <memory>
 
 class ChatHistoryModel;
+class LibraryConfigStore;
+class LibraryStore;
 class NetworkTransport;
 class ProviderCatalog;
+class RagRetriever;
 class SecureStore;
 class WebConfigStore;
 class WebSearchService;
@@ -63,6 +67,13 @@ class ChatController : public QObject
     Q_PROPERTY(QString webSearchMessage READ webSearchMessage NOTIFY webSearchChanged)
     Q_PROPERTY(bool hasWebSearchKey READ hasWebSearchKey NOTIFY webSearchChanged)
     Q_PROPERTY(QVariantList webSearchSources READ webSearchSources NOTIFY webSearchSourcesChanged)
+    Q_PROPERTY(QVariantList mountedCollections READ mountedCollections NOTIFY libraryChanged)
+    Q_PROPERTY(bool libraryMounted READ libraryMounted NOTIFY libraryChanged)
+    Q_PROPERTY(int libraryHitCount READ libraryHitCount NOTIFY libraryChanged)
+    Q_PROPERTY(int libraryTokenCount READ libraryTokenCount NOTIFY libraryChanged)
+    Q_PROPERTY(bool libraryDegraded READ libraryDegraded NOTIFY libraryChanged)
+    Q_PROPERTY(QString libraryStatus READ libraryStatus NOTIFY libraryChanged)
+    Q_PROPERTY(QVariantList librarySources READ librarySources NOTIFY librarySourcesChanged)
 
 public:
     /**
@@ -120,6 +131,25 @@ public:
     /// 上一轮联网检索命中的来源：[{title, url}]，供 UI 展示来源 chip
     QVariantList webSearchSources() const;
 
+    // ---- 资料库（A 形态：挂载小库 → 应用侧预检索 → 注入 prompt）----
+    /**
+     * 装配资料库（均可为 nullptr：为空即保持原有纯对话行为）。
+     * store 用于 citations 落库；retriever 负责检索；configStore 记忆挂载的小库。
+     */
+    void attachLibrary(LibraryStore *store, RagRetriever *retriever,
+                       LibraryConfigStore *configStore);
+    /// 已挂载小库 id 列表（QML 直接绑定；空列表 = 未挂载）
+    QVariantList mountedCollections() const;
+    bool libraryMounted() const;
+    int libraryHitCount() const;
+    int libraryTokenCount() const;
+    bool libraryDegraded() const;
+    QString libraryStatus() const;
+    /// 上一轮资料库命中的来源 chip：文件名 + 定位串 + 摘要
+    QVariantList librarySources() const;
+    Q_INVOKABLE void setMountedCollections(const QVariantList &collectionIds);
+    Q_INVOKABLE void clearMountedCollections();
+
     // ---- QML 视图：厂商 / 模型 / 参数（UI 只绑定这些，不自行解析 JSON）----
     /// 厂商下拉数据：[{id, displayName, customizable, modelCount, ...}]
     Q_INVOKABLE QVariantList providerOptions() const;
@@ -167,6 +197,8 @@ signals:
     void imagesConfirmedChanged();
     void webSearchChanged();
     void webSearchSourcesChanged();
+    void libraryChanged();
+    void librarySourcesChanged();
 
 private:
     void applyLoadedConfig(const AiConfigData &data);
@@ -182,6 +214,21 @@ private:
     void ensureProvider();
     /// 组装一轮请求：写入会话历史（可用时）、按有界上下文补全 messages，再交给 Provider
     void dispatchUserMessage(const ChatMessage &userMessage);
+    /// 资料库检索完成后的续跑：装配请求并发送（libraryContext 为空则按普通对话）
+    void continueDispatch(const ChatMessage &userMessage, const QString &apiKey,
+                          const QString &libraryContext);
+    /// 发起资料库预检索（异步）；未挂载 / 未装配时不会进入此路径
+    void beginLibraryRetrieval(const ChatMessage &userMessage);
+    /// 检索前重新读取资料库配置：用户可能在本次会话里才配好 embedding
+    void syncRetrievalConfig();
+    void handleLibraryRetrievalFinished(const RetrievalResult &result);
+    void handleLibraryRetrievalFailed(const ChatError &error);
+    /// 把命中片段组装成注入 prompt 的系统消息（含「必须列出引用来源」约束）
+    static QString buildLibraryContext(const RetrievalResult &result);
+    /// 保存 / 读取挂载的小库（config.json 的 library 段）
+    void persistMountedCollections();
+    /// 本轮回答完成后把来源写入 citations（无 messageId / store 时静默跳过）
+    void persistCitations(qint64 messageId);
 
     /// 依当前厂商解析「生效的检索方案」：内置源（复用厂商 Key）优先，其次自定义搜索源。
     /// supported 回传厂商是否支持联网；notice 回传不支持 / 未就绪时的中文提示。
@@ -253,4 +300,18 @@ private:
     QString m_currentToolCallId;
     /// 上一轮命中的来源快照（供 UI 来源 chip）
     QVariantList m_webSources;
+
+    // ---- 资料库（A 形态）----
+    LibraryStore *m_libraryStore = nullptr;
+    RagRetriever *m_retriever = nullptr;
+    LibraryConfigStore *m_libraryConfigStore = nullptr;
+    QList<qint64> m_mountedCollectionIds;
+    /// 检索进行中：只在此时接受检索回调，避免迟到结果串到下一轮
+    bool m_libraryRetrieving = false;
+    ChatMessage m_pendingUserMessage;
+    /// 上一轮检索结果（来源 chip / token 展示 / citations 落库共用）
+    RetrievalResult m_lastRetrieval;
+    QString m_libraryStatus;
+    /// 本轮 assistant 消息 id（citations 外键；会话不可持久化时为 0）
+    qint64 m_pendingAssistantMessageId = 0;
 };

@@ -1,6 +1,7 @@
 #include "core/AppController.h"
 #include "core/chat/ChatController.h"
 #include "core/chat/ChatHistoryModel.h"
+#include "core/library/LibraryController.h"
 #include "core/theme/ThemeManager.h"
 #include "core/theme/ThemePresetManager.h"
 #include "platform/TitleBarHelper.h"
@@ -36,6 +37,9 @@ int main(int argc, char *argv[])
     // 主题预设（阶段三）：与 QML 单例 Theme 区分，承载“换肤 + 持久化”职责
     engine.rootContext()->setContextProperty(QStringLiteral("ThemePreset"),
                                              controller.themePresetManager());
+    // 资料库（v0.2.5）：小库 / 文件 / 索引 / 检索配置 / 成本预估的唯一入口
+    engine.rootContext()->setContextProperty(QStringLiteral("Library"),
+                                             controller.libraryController());
     engine.load(QUrl(QStringLiteral("qrc:/qt/qml/MeowAi/ui/main.qml")));
 
     if (engine.rootObjects().isEmpty()) {

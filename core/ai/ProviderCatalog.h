@@ -43,6 +43,25 @@ struct CatalogModel
     bool isValid() const { return !id.isEmpty(); }
 };
 
+/// embedding 模型声明（v0.2.5 资料库）：同一厂商可提供多个向量模型
+struct CatalogEmbeddingModel
+{
+    QString id;
+    QString displayName;
+    int dimensions = 0;  ///< 0 = 使用服务端默认维度
+    bool isDefault = false;
+};
+
+/// 厂商的 embedding 能力（OpenAI 兼容 `/embeddings`）；不可用时由 UI 引导另选服务
+struct CatalogEmbedding
+{
+    bool available = false;
+    QList<CatalogEmbeddingModel> models;
+
+    QString defaultModelId() const;
+    CatalogEmbeddingModel model(const QString &modelId) const;
+};
+
 /// 厂商**内置**联网搜索能力声明（v0.2.4）。
 /// 有内置能力即可「零配置」：通常直接复用该厂商的 API Key，无需用户另填搜索密钥。
 struct CatalogNativeSearch
@@ -67,6 +86,8 @@ struct CatalogProvider
     QString validationMethod;           ///< models（GET /models）| chat-minimal（最小对话请求）
     bool customizable = false;          ///< 允许用户在 UI 手填 baseUrl / model
     CatalogNativeSearch nativeSearch;   ///< 内置联网搜索能力（可选）
+    CatalogEmbedding embedding;         ///< 向量化能力（资料库用）
+    QString captionModel;               ///< 图片 caption 的建议视觉模型（空 = 未声明）
     QList<CatalogModel> models;
 
     bool isValid() const { return !id.isEmpty() && !protocol.isEmpty(); }

@@ -29,6 +29,8 @@ Item {
     property var modelIds: []
     /// 当前「厂商 + 模型」是否存在高级原生参数覆盖
     property bool hasAdvanced: false
+    /// 等待用户同意后再挂载的小库 id（首次启用资料库时用）
+    property int pendingMountId: 0
 
     /// 档位显示名：档位是契约常量，展示名只做本地化，不影响下发字段
     function levelLabel(level) {
@@ -795,6 +797,54 @@ Item {
             }
         }
 
+        // 资料库命中概览：挂载数 / 命中片段数 / 本轮注入 token（数据来自 Chat，本文件不检索）
+        Row {
+            width: parent.width
+            spacing: Theme.s2
+            visible: Chat.libraryMounted || Chat.libraryStatus.length > 0
+
+            MChip {
+                visible: Chat.libraryMounted
+                dot: true
+                tone: Chat.libraryDegraded ? "accent" : "ok"
+                text: qsTr("资料库 · %1 个小库").arg(Chat.mountedCollections.length)
+            }
+
+            MChip {
+                visible: Chat.libraryHitCount > 0
+                tone: "ok"
+                text: qsTr("%1 个片段 · %2 token").arg(Chat.libraryHitCount).arg(Chat.libraryTokenCount)
+            }
+
+            MChip {
+                visible: Chat.libraryStatus.length > 0
+                tone: Chat.libraryDegraded ? "accent" : "neutral"
+                text: Chat.libraryStatus
+            }
+        }
+
+        // 来源 chip：回答里引用的文件名 + 定位（可核对到页 / 表 / 行）
+        Row {
+            width: parent.width
+            spacing: Theme.s2
+            visible: Chat.librarySources.length > 0
+
+            MLabel {
+                label: qsTr("来源")
+                anchors.verticalCenter: parent.verticalCenter
+            }
+
+            Repeater {
+                model: Chat.librarySources.slice(0, 3)
+
+                MChip {
+                    required property var modelData
+                    tone: "accent"
+                    text: modelData.fileName + " · " + modelData.locLabel
+                }
+            }
+        }
+
         // 输入条
         MSurface {
             id: composer
@@ -862,11 +912,128 @@ Item {
                         }
                     }
 
+                    // 「资料库」入口：选择要参与本轮检索的小库（只影响上下文，不改库内容）
+                    Rectangle {
+                        id: libraryToggle
+                        width: libraryToggleRow.implicitWidth + 20
+                        height: 34
+                        radius: Theme.rPill
+                        color: Chat.libraryMounted
+                               ? (libraryToggleHover.hovered ? Theme.accentHi : Theme.accent)
+                               : (libraryToggleHover.hovered ? Theme.overlayHover : Theme.overlayFaint)
+                        border.width: 1
+                        border.color: Chat.libraryMounted ? Theme.accent : Theme.hairline
+
+                        Behavior on color {
+                            ColorAnimation { duration: Theme.dFast }
+                        }
+
+                        Row {
+                            id: libraryToggleRow
+                            anchors.centerIn: parent
+                            spacing: 6
+
+                            Rectangle {
+                                width: 6
+                                height: 6
+                                radius: 3
+                                anchors.verticalCenter: parent.verticalCenter
+                                color: Chat.libraryMounted
+                                       ? Theme.accentInk
+                                       : (Library.consentGiven ? Theme.ok : Theme.textFaint)
+                            }
+
+                            Text {
+                                text: Chat.libraryMounted
+                                      ? qsTr("资料库 · %1").arg(Chat.mountedCollections.length)
+                                      : qsTr("资料库")
+                                color: Chat.libraryMounted ? Theme.accentInk : Theme.textDim
+                                font.pixelSize: Theme.fLabel
+                                font.weight: Font.Medium
+                                anchors.verticalCenter: parent.verticalCenter
+                            }
+                        }
+
+                        HoverHandler { id: libraryToggleHover }
+
+                        TapHandler {
+                            onTapped: libraryMenu.opened ? libraryMenu.close() : libraryMenu.open()
+                        }
+                    }
+
+                    Popup {
+                        id: libraryMenu
+                        parent: libraryToggle
+                        x: 0
+                        y: -height - 8
+                        width: 300
+                        padding: 10
+                        closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
+
+                        background: Rectangle {
+                            radius: Theme.rMd
+                            color: Theme.ink3
+                            border.width: 1
+                            border.color: Theme.hairlineStrong
+                        }
+
+                        contentItem: Column {
+                            spacing: Theme.s1
+
+                            MLabel { label: qsTr("挂载到对话的小库") }
+
+                            Text {
+                                width: 280
+                                visible: Library.collections.length === 0
+                                text: qsTr("还没有小库：去左侧「资料库」创建并导入文件")
+                                color: Theme.textFaint
+                                font.pixelSize: Theme.fLabel
+                                wrapMode: Text.Wrap
+                            }
+
+                            Repeater {
+                                model: Library.mountOptions
+
+                                Item {
+                                    id: mountRow
+                                    required property var modelData
+                                    width: 280
+                                    height: 34
+
+                                    Text {
+                                        anchors.left: parent.left
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        width: parent.width - 56
+                                        text: mountRow.modelData.name
+                                        color: Theme.text
+                                        font.pixelSize: Theme.fSmall
+                                        elide: Text.ElideRight
+                                    }
+
+                                    MSwitch {
+                                        anchors.right: parent.right
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        checked: mountRow.modelData.mounted
+                                        onToggled: {
+                                            if (checked && !Library.consentGiven) {
+                                                page.pendingMountId = mountRow.modelData.id
+                                                libraryMenu.close()
+                                                libraryConsentDialog.open = true
+                                            } else {
+                                                Library.setMounted(mountRow.modelData.id, checked)
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
                     MField {
                         id: composerField
-                        width: parent.width - webToggle.width - sendButton.width
+                        width: parent.width - webToggle.width - libraryToggle.width - sendButton.width
                                - (cancelButton.visible ? cancelButton.width : 0)
-                               - parent.spacing * (cancelButton.visible ? 3 : 2)
+                               - parent.spacing * (cancelButton.visible ? 4 : 3)
                         placeholderText: Chat.busy
                                          ? qsTr("正在生成…")
                                          : qsTr("输入消息，回车发送")
@@ -1141,5 +1308,19 @@ Item {
             color: Theme.textGhost
             font.pixelSize: Theme.fSmall
         }
+    }
+
+    // 资料库首次启用 / 内容外发同意：只在用户点「挂载」且尚未同意时出现
+    LibraryConsent {
+        id: libraryConsentDialog
+        anchors.fill: parent
+        onAccepted: {
+            Library.grantConsent()
+            if (page.pendingMountId > 0) {
+                Library.setMounted(page.pendingMountId, true)
+                page.pendingMountId = 0
+            }
+        }
+        onRejected: page.pendingMountId = 0
     }
 }

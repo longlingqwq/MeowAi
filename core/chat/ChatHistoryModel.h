@@ -62,8 +62,9 @@ public:
 
     // --- 供 ChatController 写入当前会话（非 QML 接口）---
     void appendUserMessage(const QString &text);
-    /// 追加一条空的 assistant 占位（status = streaming），随后由 delta 填充
-    void beginAssistantMessage();
+    /// 追加一条空的 assistant 占位（status = streaming），随后由 delta 填充。
+    /// 返回消息 id（不可持久化 / 失败时返回 0），供资料库 citations 关联
+    qint64 beginAssistantMessage();
     /// 流式增量：内存立即追加，落库按 kFlushIntervalMs 节流
     void appendAssistantDelta(const QString &delta);
     /// 终局：status ∈ complete | partial | error；finalText 非空时以它为准（对齐整包响应）

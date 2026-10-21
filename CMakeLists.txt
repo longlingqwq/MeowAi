@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.21)
 
 project(MeowAi
-    VERSION 0.2.4
+    VERSION 0.2.5
     DESCRIPTION "MeowAi - 本地优先的 AI 助理客户端"
     LANGUAGES CXX
 )
@@ -29,9 +29,30 @@ add_library(MeowAiLib STATIC
     core/ai/ProviderCatalog.cpp
     core/chat/ChatController.cpp
     core/chat/ChatHistoryModel.cpp
+    core/library/CollectionManager.cpp
+    core/library/CostEstimator.cpp
+    core/library/LibraryController.cpp
+    core/library/LibraryFileKinds.cpp
+    core/library/LibraryIndexer.cpp
     core/library/LibraryManager.cpp
     core/library/CategoryManager.cpp
     core/library/BackupManager.cpp
+    core/library/ImageCaptionService.cpp
+    core/library/extract/CsvExtractor.cpp
+    core/library/extract/DocxExtractor.cpp
+    core/library/extract/ExtractorRegistry.cpp
+    core/library/extract/ImageCaptionExtractor.cpp
+    core/library/extract/ImageTranscoder.cpp
+    core/library/extract/JsonExtractor.cpp
+    core/library/extract/OfficeXmlUtils.cpp
+    core/library/extract/PdfTextExtractor.cpp
+    core/library/extract/PlainTextExtractor.cpp
+    core/library/extract/PptxExtractor.cpp
+    core/library/extract/VideoExtractor.cpp
+    core/library/extract/XlsxExtractor.cpp
+    core/retriever/ChunkSplitter.cpp
+    core/retriever/EmbeddingService.cpp
+    core/retriever/RagRetriever.cpp
     core/retriever/NullRetriever.cpp
     core/skill/SkillRegistry.cpp
     core/theme/ThemeManager.cpp
@@ -58,8 +79,11 @@ add_library(MeowAiLib STATIC
     storage/AiConfigStore.cpp
     storage/ChatStore.cpp
     storage/Database.cpp
+    storage/LibraryConfigStore.cpp
+    storage/LibraryStore.cpp
     storage/PersonalizationStore.cpp
     storage/SecureStore.cpp
+    storage/SqliteVectorIndex.cpp
     storage/ThemeStore.cpp
     storage/WebConfigStore.cpp
 
@@ -119,6 +143,8 @@ qt_add_qml_module(MeowAi
         # 页面
         ui/ConversationPage.qml
         ui/PersonalizationPage.qml
+        ui/LibraryPage.qml
+        ui/LibraryConsent.qml
         ui/SplashVideo.qml
 )
 
@@ -150,10 +176,50 @@ qt_add_resources(MeowAi "providers"
         resources/providers.json
 )
 
+# 资料库成本参考价（v0.2.5）：运行期路径 ":/pricing/pricing.json"。
+# core/library/CostEstimator 只按路径读取；价格更新＝改这个文件，零代码。
+qt_add_resources(MeowAi "pricing"
+    PREFIX "/pricing"
+    BASE resources
+    FILES
+        resources/pricing.json
+)
+
 # 可执行程序是 QML 宿主：Multimedia 仅用于 QML 侧开屏视频播放（功能 #11），
 # QuickControls2 仅用于在 main.cpp 里锁定 Basic 样式（全自绘 UI 的前提），
 # 两者都不进入 core 层，保持分层不被污染。
 target_link_libraries(MeowAi PRIVATE MeowAiLib Qt6::Quick Qt6::Multimedia Qt6::QuickControls2)
+
+# ---------------------------------------------------------------------------
+# PDFium（可选依赖，模块 M3-c：PDF 文本层解析）
+# 产物**本地放置、仓库忽略**（.gitignore 已忽略 third_party/pdfium/，不进 PR diff）。
+# 抓取： pwsh scripts/fetch-pdfium.ps1   （固定 tag chromium/8111）
+# 目录存在即链接并定义 MEOWAI_HAVE_PDFIUM；缺失则编译降级实现：
+# 解析 pdf 时返回 false + 「PDF 支持未启用」，由上层落成 no_text_layer，不影响其它格式。
+# ---------------------------------------------------------------------------
+set(MEOWAI_PDFIUM_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party/pdfium")
+if(EXISTS "${MEOWAI_PDFIUM_DIR}/include/fpdfview.h"
+   AND EXISTS "${MEOWAI_PDFIUM_DIR}/include/fpdf_text.h"
+   AND EXISTS "${MEOWAI_PDFIUM_DIR}/lib/pdfium.dll.lib")
+    add_library(pdfium SHARED IMPORTED GLOBAL)
+    set_target_properties(pdfium PROPERTIES
+        IMPORTED_LOCATION "${MEOWAI_PDFIUM_DIR}/bin/pdfium.dll"
+        IMPORTED_IMPLIB "${MEOWAI_PDFIUM_DIR}/lib/pdfium.dll.lib"
+        INTERFACE_INCLUDE_DIRECTORIES "${MEOWAI_PDFIUM_DIR}/include"
+    )
+    # PUBLIC：测试目标需要据此切换断言分支（有/无 PDFium 两种口径）
+    target_link_libraries(MeowAiLib PRIVATE pdfium)
+    target_compile_definitions(MeowAiLib PUBLIC MEOWAI_HAVE_PDFIUM=1)
+
+    # Windows 运行期不查 PATH 之外的库路径：pdfium.dll 必须与可执行文件同目录
+    add_custom_command(TARGET MeowAi POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "$<TARGET_FILE:pdfium>" "$<TARGET_FILE_DIR:MeowAi>"
+    )
+    message(STATUS "PDFium 已启用（PDF 文本层解析）：${MEOWAI_PDFIUM_DIR}")
+else()
+    message(STATUS "PDFium 未检测到：PDF 解析降级为「未启用」（抓取：pwsh scripts/fetch-pdfium.ps1）")
+endif()
 
 # ---------------------------------------------------------------------------
 # 单元测试

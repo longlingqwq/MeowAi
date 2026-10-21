@@ -96,7 +96,8 @@ Window {
             height: root.titleBarHeight
             visible: App.customTitleBar
             targetWindow: root
-            pageTitle: root.pageIndex === 0 ? qsTr("对话") : qsTr("个性化")
+            pageTitle: root.pageIndex === 0 ? qsTr("对话")
+                       : (root.pageIndex === 1 ? qsTr("个性化") : qsTr("资料库"))
         }
 
         // ------------------------------------------------ 左侧导航栏
@@ -247,6 +248,48 @@ Window {
                         HoverHandler { id: navPersoHover }
                         TapHandler { onTapped: root.pageIndex = 1 }
                     }
+
+                    Item {
+                        width: parent.width
+                        height: 40
+
+                        readonly property bool current: root.pageIndex === 2
+
+                        Rectangle {
+                            anchors.fill: parent
+                            radius: Theme.rMd
+                            color: parent.current
+                                   ? Theme.accentGhost
+                                   : (navLibraryHover.hovered ? Theme.overlayFaint : "transparent")
+
+                            Behavior on color {
+                                ColorAnimation { duration: Theme.dFast }
+                            }
+                        }
+
+                        Rectangle {
+                            visible: parent.current
+                            anchors.left: parent.left
+                            anchors.verticalCenter: parent.verticalCenter
+                            width: 2
+                            height: 18
+                            radius: 1
+                            color: Theme.accent
+                        }
+
+                        Text {
+                            anchors.left: parent.left
+                            anchors.leftMargin: Theme.s3 + 4
+                            anchors.verticalCenter: parent.verticalCenter
+                            text: qsTr("资料库")
+                            color: parent.current ? Theme.text : Theme.textDim
+                            font.pixelSize: Theme.fBody
+                            font.weight: parent.current ? Font.DemiBold : Font.Normal
+                        }
+
+                        HoverHandler { id: navLibraryHover }
+                        TapHandler { onTapped: root.pageIndex = 2 }
+                    }
                 }
             }
 
@@ -315,7 +358,8 @@ Window {
                     spacing: 2
 
                     Text {
-                        text: root.pageIndex === 0 ? qsTr("对话") : qsTr("个性化")
+                        text: root.pageIndex === 0 ? qsTr("对话")
+                              : (root.pageIndex === 1 ? qsTr("个性化") : qsTr("资料库"))
                         color: Theme.text
                         font.pixelSize: Theme.fH1
                         font.weight: Font.DemiBold
@@ -324,7 +368,9 @@ Window {
                     Text {
                         text: root.pageIndex === 0
                               ? qsTr("与本地助理交谈")
-                              : qsTr("主题 · 字体 · 背景 · 头像 · 开屏")
+                              : (root.pageIndex === 1
+                                 ? qsTr("主题 · 字体 · 背景 · 头像 · 开屏")
+                                 : qsTr("小库 · 关联文件夹 · 检索与成本"))
                         color: Theme.textFaint
                         font.pixelSize: Theme.fSmall
                     }
@@ -386,6 +432,14 @@ Window {
                             root.splashConsumed = false
                             root.previewing = true
                         }
+                    }
+                }
+
+                Item {
+                    id: libraryHost
+
+                    LibraryPage {
+                        anchors.fill: parent
                     }
                 }
             }
