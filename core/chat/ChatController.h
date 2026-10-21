@@ -1,5 +1,6 @@
 #pragma once
 
+#include "core/retriever/FileLevelRetriever.h"
 #include "core/retriever/RetrievalConfig.h"
 #include "core/web/WebSearchProvider.h"
 #include "providers/AiProvider.h"
@@ -74,6 +75,8 @@ class ChatController : public QObject
     Q_PROPERTY(bool libraryDegraded READ libraryDegraded NOTIFY libraryChanged)
     Q_PROPERTY(QString libraryStatus READ libraryStatus NOTIFY libraryChanged)
     Q_PROPERTY(QVariantList librarySources READ librarySources NOTIFY librarySourcesChanged)
+    /// 本次回答注入的文件级明细：fileName / level / tokenEst / truncated / trace
+    Q_PROPERTY(QVariantList libraryInjections READ libraryInjections NOTIFY librarySourcesChanged)
 
 public:
     /**
@@ -134,10 +137,13 @@ public:
     // ---- 资料库（A 形态：挂载小库 → 应用侧预检索 → 注入 prompt）----
     /**
      * 装配资料库（均可为 nullptr：为空即保持原有纯对话行为）。
-     * store 用于 citations 落库；retriever 负责检索；configStore 记忆挂载的小库。
+     * store 用于 citations 落库；ragRetriever 负责片段候选召回；
+     * fileRetriever 负责文件级聚合 + 三级注入编排（可为 nullptr → 回退片段模式）；
+     * configStore 记忆挂载的小库与预算。
      */
-    void attachLibrary(LibraryStore *store, RagRetriever *retriever,
-                       LibraryConfigStore *configStore);
+    void attachLibrary(LibraryStore *store, RagRetriever *ragRetriever,
+                       LibraryConfigStore *configStore,
+                       FileLevelRetriever *fileRetriever = nullptr);
     /// 已挂载小库 id 列表（QML 直接绑定；空列表 = 未挂载）
     QVariantList mountedCollections() const;
     bool libraryMounted() const;
@@ -147,6 +153,7 @@ public:
     QString libraryStatus() const;
     /// 上一轮资料库命中的来源 chip：文件名 + 定位串 + 摘要
     QVariantList librarySources() const;
+    QVariantList libraryInjections() const;
     Q_INVOKABLE void setMountedCollections(const QVariantList &collectionIds);
     Q_INVOKABLE void clearMountedCollections();
 
@@ -223,8 +230,12 @@ private:
     void syncRetrievalConfig();
     void handleLibraryRetrievalFinished(const RetrievalResult &result);
     void handleLibraryRetrievalFailed(const ChatError &error);
-    /// 把命中片段组装成注入 prompt 的系统消息（含「必须列出引用来源」约束）
+    /// 把命中片段组装成注入 prompt 的系统消息
     static QString buildLibraryContext(const RetrievalResult &result);
+    /// v0.2.6: 文件级召回结果组装（仅供参考语义 + 三级注入标注）
+    QString buildLibraryContext(const QList<DocumentInjectionResult> &docs);
+    /// 当前模型的上下文窗口（0 = 未知，由 BudgetCalculator 回退保守值）
+    int contextWindowForCurrentModel() const;
     /// 保存 / 读取挂载的小库（config.json 的 library 段）
     void persistMountedCollections();
     /// 本轮回答完成后把来源写入 citations（无 messageId / store 时静默跳过）
@@ -269,6 +280,9 @@ private:
     QHash<QString, QString> m_modelByProvider;
     /// 动态拉取到的模型清单：providerId -> 模型 id 列表（仅内存，失败不清空）
     QHash<QString, QStringList> m_fetchedModels;
+    /// 拉取模型时厂商返回的上下文窗口：providerId -> (模型 id -> tokens)。
+    /// 仅部分厂商（OpenRouter / Together / Groq / Gemini 等）会返回该字段，其余查 providers.json。
+    QHash<QString, QHash<QString, int>> m_modelContextWindows;
     QString m_modelListMessage;
 
     CredentialStatus m_credentialStatus = CredentialStatus::Unknown;
@@ -304,6 +318,7 @@ private:
     // ---- 资料库（A 形态）----
     LibraryStore *m_libraryStore = nullptr;
     RagRetriever *m_retriever = nullptr;
+    FileLevelRetriever *m_fileRetriever = nullptr;  ///< v0.2.6 文件级召回（可为 nullptr → 回退片段模式）
     LibraryConfigStore *m_libraryConfigStore = nullptr;
     QList<qint64> m_mountedCollectionIds;
     /// 检索进行中：只在此时接受检索回调，避免迟到结果串到下一轮
@@ -311,6 +326,8 @@ private:
     ChatMessage m_pendingUserMessage;
     /// 上一轮检索结果（来源 chip / token 展示 / citations 落库共用）
     RetrievalResult m_lastRetrieval;
+    /// 上一轮文件级注入明细（v0.2.6）：供 UI 展示每个文件的注入级别与降级原因
+    QList<DocumentInjectionResult> m_lastInjections;
     QString m_libraryStatus;
     /// 本轮 assistant 消息 id（citations 外键；会话不可持久化时为 0）
     qint64 m_pendingAssistantMessageId = 0;

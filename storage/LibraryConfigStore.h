@@ -49,6 +49,15 @@ struct LibraryConfigData
     int chunkSize = 700;
     int chunkOverlap = 120;
 
+    // 参考资料模式（v0.2.6）：文件级注入预算
+    int perFileBudget = 20000;          ///< 单文件注入 token 上限（全文/章节/片段）
+    int globalBudget = 100000;          ///< 全局注入 token 上限（所有相关文件合计）
+    int contextReserve = 2000;          ///< 回答预留 token（给模型生成回复）
+    double fileAggregateWeight = 0.05;   ///< 文件聚合打分权重：maxScore + hitCount × weight
+    /// 模型未提供上下文窗口时的估算值（厂商 `/models` 无窗口字段、JSON 也未内置时使用）。
+    /// 用户可按所用模型自行调整，例如 1M 上下文的模型可填 1000000。
+    int fallbackContextWindow = 32768;
+
     LibraryEmbeddingConfig embedding;
     LibraryCaptionConfig caption;
     QList<qint64> mountedCollections;  ///< 对话侧挂载的小库（重启保留）

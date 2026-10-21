@@ -350,6 +350,8 @@ bool ProviderCatalog::load(QString *error)
             model.supportsVision =
                 modelObject.value(QStringLiteral("supportsVision")).toBool(false);
             model.isDefault = modelObject.value(QStringLiteral("isDefault")).toBool(false);
+            model.contextWindow =
+                modelObject.value(QStringLiteral("contextWindow")).toInt(0);
 
             QString warning;
             if (!parseThinkingSpec(modelObject.value(QStringLiteral("thinkingSpec")), &model.thinking,

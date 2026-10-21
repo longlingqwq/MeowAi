@@ -7,6 +7,7 @@
 #include "platform/TitleBarHelper.h"
 
 #include <QGuiApplication>
+#include <QIcon>
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
 #include <QQuickStyle>
@@ -23,6 +24,9 @@ int main(int argc, char *argv[])
     QGuiApplication app(argc, argv);
     QGuiApplication::setOrganizationName(QStringLiteral("MeowAi"));
     QGuiApplication::setApplicationName(QStringLiteral("MeowAi"));
+    // 窗口图标（任务栏 / Alt+Tab）：图标已编译进 exe 资源，无需额外文件。
+    // 无边框窗口不会自动继承 exe 内嵌图标，必须显式设置，否则显示 Qt 默认图标。
+    QGuiApplication::setWindowIcon(QIcon(QStringLiteral(":/branding/app.png")));
 
     AppController controller;
     controller.initialize();

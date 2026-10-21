@@ -25,6 +25,11 @@ constexpr auto kKeyNeighborRadius = "neighborRadius";
 constexpr auto kKeyFtsFallback = "ftsFallback";
 constexpr auto kKeyChunkSize = "chunkSize";
 constexpr auto kKeyChunkOverlap = "chunkOverlap";
+constexpr auto kKeyPerFileBudget = "perFileBudget";
+constexpr auto kKeyGlobalBudget = "globalBudget";
+constexpr auto kKeyContextReserve = "contextReserve";
+constexpr auto kKeyFileAggregateWeight = "fileAggregateWeight";
+constexpr auto kKeyFallbackContextWindow = "fallbackContextWindow";
 constexpr auto kKeyEmbedding = "embedding";
 constexpr auto kKeyCaption = "caption";
 constexpr auto kKeyMounted = "mountedCollections";
@@ -113,6 +118,16 @@ LibraryConfigData LibraryConfigStore::load(QString *error) const
     data.chunkSize = readInt(section, QLatin1String(kKeyChunkSize), data.chunkSize);
     data.chunkOverlap = readInt(section, QLatin1String(kKeyChunkOverlap), data.chunkOverlap);
 
+    data.perFileBudget = readInt(section, QLatin1String(kKeyPerFileBudget), data.perFileBudget);
+    data.globalBudget = readInt(section, QLatin1String(kKeyGlobalBudget), data.globalBudget);
+    data.contextReserve = readInt(section, QLatin1String(kKeyContextReserve), data.contextReserve);
+    data.fallbackContextWindow = readInt(section, QLatin1String(kKeyFallbackContextWindow),
+                                         data.fallbackContextWindow);
+
+    const QJsonValue aggWeight = section.value(QLatin1String(kKeyFileAggregateWeight));
+    if (aggWeight.isDouble())
+        data.fileAggregateWeight = aggWeight.toDouble();
+
     const QJsonValue threshold = section.value(QLatin1String(kKeySimilarity));
     if (threshold.isDouble())
         data.similarityThreshold = threshold.toDouble();
@@ -184,6 +199,11 @@ bool LibraryConfigStore::save(const LibraryConfigData &data, QString *error) con
     section.insert(QLatin1String(kKeyFtsFallback), data.ftsFallback);
     section.insert(QLatin1String(kKeyChunkSize), data.chunkSize);
     section.insert(QLatin1String(kKeyChunkOverlap), data.chunkOverlap);
+    section.insert(QLatin1String(kKeyPerFileBudget), data.perFileBudget);
+    section.insert(QLatin1String(kKeyGlobalBudget), data.globalBudget);
+    section.insert(QLatin1String(kKeyContextReserve), data.contextReserve);
+    section.insert(QLatin1String(kKeyFallbackContextWindow), data.fallbackContextWindow);
+    section.insert(QLatin1String(kKeyFileAggregateWeight), data.fileAggregateWeight);
     section.insert(QLatin1String(kKeyEmbedding), embedding);
     section.insert(QLatin1String(kKeyCaption), caption);
     section.insert(QLatin1String(kKeyMounted), mounted);

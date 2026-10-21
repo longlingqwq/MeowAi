@@ -10,6 +10,8 @@ Rectangle {
     property string text: ""
     property string tone: "neutral"
     property bool dot: false
+    /// 最大宽度（<=0 表示不限制）：超出时文字省略，避免撑破父布局
+    property real maxWidth: -1
 
     implicitWidth: row.implicitWidth + Theme.s3
     implicitHeight: 22
@@ -54,7 +56,13 @@ Rectangle {
         }
 
         Text {
+            id: label
             text: root.text
+            width: root.maxWidth > 0
+                   ? Math.max(0, Math.min(label.implicitWidth,
+                                          root.maxWidth - Theme.s3 - (root.dot ? 11 : 0)))
+                   : label.implicitWidth
+            elide: Text.ElideRight
             color: {
                 switch (root.tone) {
                 case "accent": return Theme.accentHi

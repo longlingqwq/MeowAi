@@ -132,7 +132,7 @@ Item {
 
                         MCombo {
                             id: fontBox
-                            width: 300
+                            width: Math.max(160, Math.min(300, parent.width - 330))
                             enabled: Personalize.available
                             model: Personalize.availableFontFamilies()
                             placeholderText: qsTr("选择字体…")
@@ -458,6 +458,161 @@ Item {
                 title: qsTr("选择开屏视频")
                 nameFilters: [qsTr("视频 (*.mp4 *.mov *.m4v *.webm *.mkv *.avi)")]
                 onAccepted: Personalize.setSplash(selectedFile.toString())
+            }
+
+            // ------------------------------------------------ 帮助与关于
+            MSurface {
+                width: parent.width
+                height: helpSection.implicitHeight + Theme.s5 * 2
+
+                Row {
+                    id: helpSection
+                    anchors.left: parent.left
+                    anchors.right: parent.right
+                    anchors.top: parent.top
+                    anchors.margins: Theme.s5
+                    spacing: Theme.s4
+
+                    Column {
+                        spacing: Theme.s2
+                        width: Math.min(page.width - 220, 460)
+
+                        MLabel {
+                            label: qsTr("帮助")
+                            anchors.left: parent.left
+                        }
+
+                        Text {
+                            width: parent.width
+                            text: qsTr("开发者：Longling　联系方式：3086865618@qq.com")
+                            color: Theme.textDim
+                            font.pixelSize: Theme.fSmall
+                            wrapMode: Text.Wrap
+                        }
+
+                        Text {
+                            width: parent.width
+                            text: qsTr("遇到问题、想反馈建议或申请新功能，都可以通过上面的邮箱联系。")
+                            color: Theme.textFaint
+                            font.pixelSize: Theme.fSmall
+                            wrapMode: Text.Wrap
+                            lineHeight: 1.5
+                        }
+                    }
+
+                    MButton {
+                        text: qsTr("帮助")
+                        variant: "primary"
+                        small: true
+                        anchors.verticalCenter: parent.verticalCenter
+                        onClicked: helpDialog.open()
+                    }
+                }
+            }
+
+            /// 帮助弹层：开发者与联系方式为固定信息，与《用户手册》保持一致
+            Popup {
+                id: helpDialog
+                parent: Overlay.overlay
+                width: Math.min(520, parent ? parent.width - 48 : 520)
+                height: Math.min(helpContent.implicitHeight + Theme.s5 * 2,
+                                parent ? parent.height - 48 : 720)
+                x: parent ? Math.round((parent.width - width) / 2) : 0
+                y: parent ? Math.round((parent.height - height) / 2) : 0
+                padding: 0
+                modal: true
+                focus: true
+                closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
+
+                background: Rectangle {
+                    radius: Theme.rLg
+                    color: Theme.ink3
+                    border.width: 1
+                    border.color: Theme.hairlineStrong
+                }
+
+                contentItem: Item {
+                    id: helpBody
+
+                    Column {
+                        id: helpContent
+                        anchors.left: parent.left
+                        anchors.right: parent.right
+                        anchors.top: parent.top
+                        anchors.margins: Theme.s5
+                        spacing: Theme.s3
+
+                        Row {
+                            spacing: Theme.s2
+
+                            EyeMark {
+                                width: 28
+                                height: 28
+                                anchors.verticalCenter: parent.verticalCenter
+                            }
+
+                            Text {
+                                text: "MeowAi"
+                                color: Theme.text
+                                font.pixelSize: Theme.fH1
+                                font.weight: Font.DemiBold
+                                font.letterSpacing: 1.6
+                                anchors.verticalCenter: parent.verticalCenter
+                            }
+                        }
+
+                        Text {
+                            width: parent.width
+                            text: qsTr("开发者：Longling　联系方式：3086865618@qq.com")
+                            color: Theme.textDim
+                            font.pixelSize: Theme.fSmall
+                            wrapMode: Text.Wrap
+                        }
+
+                        Rectangle {
+                            width: parent.width
+                            height: 1
+                            color: Theme.hairline
+                        }
+
+                        MLabel { label: qsTr("快速上手") }
+
+                        Text {
+                            width: parent.width
+                            text: qsTr("1. 在「对话」页选择模型，填入自己的 API Key；\n"
+                                       + "2. 在「资料库」新建小库并导入文件，索引完成后挂载；\n"
+                                       + "3. 打开「参考资料模式」，助理会先引用你的文件再回答；\n"
+                                       + "4. 数据（对话、索引、密钥）都保存在本机，只把提问所需的文字发往你选择的模型服务。")
+                            color: Theme.textFaint
+                            font.pixelSize: Theme.fSmall
+                            wrapMode: Text.Wrap
+                            lineHeight: 1.5
+                        }
+
+                        Text {
+                            width: parent.width
+                            text: qsTr("完整操作说明见随安装包提供的《用户手册》（USER_GUIDE.md）。")
+                            color: Theme.textFaint
+                            font.pixelSize: Theme.fSmall
+                            wrapMode: Text.Wrap
+                            lineHeight: 1.5
+                        }
+
+                        Item {
+                            width: parent.width
+                            height: closeButton.height
+
+                            MButton {
+                                id: closeButton
+                                text: qsTr("关闭")
+                                variant: "ghost"
+                                small: true
+                                anchors.right: parent.right
+                                onClicked: helpDialog.close()
+                            }
+                        }
+                    }
+                }
             }
 
             // ------------------------------------------------ 重置

@@ -8,6 +8,7 @@
 #include "providers/ProviderFactory.h"
 #include "storage/AiConfigStore.h"
 #include "storage/AppPaths.h"
+#include "storage/DocumentStore.h"
 #include "storage/LibraryStore.h"
 #include "storage/SecureStore.h"
 #include "storage/SqliteVectorIndex.h"
@@ -43,7 +44,8 @@ LibraryController::LibraryController(AppPaths paths, LibraryStore *store,
                                      LibraryConfigStore *configStore, EmbeddingService *embedding,
                                      SqliteVectorIndex *vectorIndex, RagRetriever *retriever,
                                      ProviderCatalog *catalog, SecureStore *secure,
-                                     AiConfigStore *aiConfig, QObject *parent)
+                                     AiConfigStore *aiConfig, DocumentStore *documentStore,
+                                     QObject *parent)
     : QObject(parent)
     , m_store(store)
     , m_configStore(configStore)
@@ -53,10 +55,15 @@ LibraryController::LibraryController(AppPaths paths, LibraryStore *store,
     , m_catalog(catalog)
     , m_secure(secure)
     , m_aiConfig(aiConfig)
+    , m_documentStore(documentStore)
     , m_files(std::make_unique<LibraryManager>(paths, store))
     , m_collections(std::make_unique<CollectionManager>(store, m_files.get()))
     , m_indexer(std::make_unique<LibraryIndexer>(store, vectorIndex, embedding))
 {
+    // v0.2.6: 把 DocumentStore 传给 Indexer，索引完成后自动填充 documents/sections 元数据
+    if (m_indexer && documentStore) {
+        m_indexer->setDocumentStore(documentStore);
+    }
     m_cost.load();
 
     connect(m_indexer.get(), &LibraryIndexer::fileStarted, this, [this](qint64 fileId) {
@@ -694,6 +701,83 @@ void LibraryController::setChunkOverlap(int value)
     m_config.chunkOverlap = value;
     persist();
     m_indexer->setConfig(m_config);
+    emit retrievalChanged();
+}
+
+// ---- 参考资料模式（v0.2.6）----
+
+int LibraryController::perFileBudget() const
+{
+    return m_config.perFileBudget;
+}
+
+int LibraryController::globalBudget() const
+{
+    return m_config.globalBudget;
+}
+
+int LibraryController::contextReserve() const
+{
+    return m_config.contextReserve;
+}
+
+double LibraryController::fileAggregateWeight() const
+{
+    return m_config.fileAggregateWeight;
+}
+
+void LibraryController::setPerFileBudget(int value)
+{
+    value = std::clamp(value, 1000, 200000);
+    if (value == m_config.perFileBudget)
+        return;
+    m_config.perFileBudget = value;
+    persist();
+    emit retrievalChanged();
+}
+
+void LibraryController::setGlobalBudget(int value)
+{
+    value = std::clamp(value, 1000, 500000);
+    if (value == m_config.globalBudget)
+        return;
+    m_config.globalBudget = value;
+    persist();
+    emit retrievalChanged();
+}
+
+void LibraryController::setContextReserve(int value)
+{
+    value = std::clamp(value, 200, 32000);
+    if (value == m_config.contextReserve)
+        return;
+    m_config.contextReserve = value;
+    persist();
+    emit retrievalChanged();
+}
+
+void LibraryController::setFileAggregateWeight(double value)
+{
+    value = std::clamp(value, 0.0, 1.0);
+    if (qFuzzyCompare(value + 1.0, m_config.fileAggregateWeight + 1.0))
+        return;
+    m_config.fileAggregateWeight = value;
+    persist();
+    emit retrievalChanged();
+}
+
+int LibraryController::fallbackContextWindow() const
+{
+    return m_config.fallbackContextWindow;
+}
+
+void LibraryController::setFallbackContextWindow(int value)
+{
+    value = std::clamp(value, 2000, 4000000);
+    if (value == m_config.fallbackContextWindow)
+        return;
+    m_config.fallbackContextWindow = value;
+    persist();
     emit retrievalChanged();
 }
 

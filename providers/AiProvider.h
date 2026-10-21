@@ -2,6 +2,7 @@
 
 #include "providers/ChatTypes.h"
 
+#include <QHash>
 #include <QObject>
 #include <QStringList>
 
@@ -32,6 +33,15 @@ public:
 
     /// 异步发起对话，结果通过信号返回，绝不阻塞 UI 线程
     virtual void sendChat(const ChatRequest &request) = 0;
+
+    /**
+     * 最近一次拉取模型清单时厂商返回的上下文窗口（模型 id → tokens）。
+     *
+     * 只有部分厂商（OpenRouter / Together / Groq / Gemini 等）会在 `/models`
+     * 响应里给出该字段；主流国内厂商只返回 id，此时返回空表，由 providers.json
+     * 内置值兜底。默认实现为空表。
+     */
+    virtual QHash<QString, int> modelContextWindows() const { return {}; }
 
     /// 取消进行中的请求；无请求时为空操作。**必须真正中断在途网络请求**
     virtual void cancel() = 0;

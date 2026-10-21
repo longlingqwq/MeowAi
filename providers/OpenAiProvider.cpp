@@ -312,17 +312,37 @@ void OpenAiProvider::finishValidation(CredentialStatus status, const QString &me
 QStringList OpenAiProvider::parseModelIds() const
 {
     QStringList ids;
+    m_modelContextWindows.clear();
+
     QJsonParseError parseError;
     const QJsonDocument document = QJsonDocument::fromJson(m_auxBody, &parseError);
     if (parseError.error != QJsonParseError::NoError || !document.isObject())
         return ids;
 
-    // OpenAI 兼容厂商统一返回 {"data":[{"id":"..."}]}
+    // OpenAI 兼容厂商统一返回 {"data":[{"id":"..."}]}；
+    // OpenRouter / Together / Groq / DeepInfra 等还会附带上下文窗口字段，能读到就用
+    static const QStringList kWindowKeys = {
+        QStringLiteral("context_length"),
+        QStringLiteral("context_window"),
+        QStringLiteral("max_context_tokens"),
+        QStringLiteral("max_input_tokens"),
+    };
+
     const QJsonArray data = document.object().value(QStringLiteral("data")).toArray();
     for (const QJsonValue &entry : data) {
-        const QString id = entry.toObject().value(QStringLiteral("id")).toString().trimmed();
-        if (!id.isEmpty() && !ids.contains(id))
-            ids.append(id);
+        const QJsonObject object = entry.toObject();
+        const QString id = object.value(QStringLiteral("id")).toString().trimmed();
+        if (id.isEmpty() || ids.contains(id))
+            continue;
+        ids.append(id);
+
+        for (const QString &key : kWindowKeys) {
+            const int window = object.value(key).toInt(0);
+            if (window > 0) {
+                m_modelContextWindows.insert(id, window);
+                break;
+            }
+        }
     }
     return ids;
 }

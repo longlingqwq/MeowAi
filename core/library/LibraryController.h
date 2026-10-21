@@ -16,8 +16,10 @@ class AiConfigStore;
 class AiProvider;
 class AppPaths;
 class CollectionManager;
+class DocumentStore;
 class EmbeddingService;
 class ImageCaptionService;
+class LibraryConfigStore;
 class LibraryStore;
 class ProviderCatalog;
 class RagRetriever;
@@ -63,6 +65,14 @@ class LibraryController : public QObject
     Q_PROPERTY(bool ftsFallback READ ftsFallback WRITE setFtsFallback NOTIFY retrievalChanged)
     Q_PROPERTY(int chunkSize READ chunkSize WRITE setChunkSize NOTIFY retrievalChanged)
     Q_PROPERTY(int chunkOverlap READ chunkOverlap WRITE setChunkOverlap NOTIFY retrievalChanged)
+    // 参考资料模式（v0.2.6）
+    Q_PROPERTY(int perFileBudget READ perFileBudget WRITE setPerFileBudget NOTIFY retrievalChanged)
+    Q_PROPERTY(int globalBudget READ globalBudget WRITE setGlobalBudget NOTIFY retrievalChanged)
+    Q_PROPERTY(int contextReserve READ contextReserve WRITE setContextReserve NOTIFY retrievalChanged)
+    Q_PROPERTY(double fileAggregateWeight READ fileAggregateWeight WRITE setFileAggregateWeight
+                   NOTIFY retrievalChanged)
+    Q_PROPERTY(int fallbackContextWindow READ fallbackContextWindow WRITE setFallbackContextWindow
+                   NOTIFY retrievalChanged)
 
     Q_PROPERTY(QString embeddingProviderId READ embeddingProviderId NOTIFY embeddingChanged)
     Q_PROPERTY(QString embeddingModelId READ embeddingModelId NOTIFY embeddingChanged)
@@ -80,7 +90,8 @@ public:
     LibraryController(AppPaths paths, LibraryStore *store, LibraryConfigStore *configStore,
                        EmbeddingService *embedding, SqliteVectorIndex *vectorIndex,
                        RagRetriever *retriever, ProviderCatalog *catalog, SecureStore *secure,
-                       AiConfigStore *aiConfig, QObject *parent = nullptr);
+                       AiConfigStore *aiConfig, DocumentStore *documentStore = nullptr,
+                       QObject *parent = nullptr);
     ~LibraryController() override;
 
     bool available() const;
@@ -107,6 +118,12 @@ public:
     bool ftsFallback() const;
     int chunkSize() const;
     int chunkOverlap() const;
+    // 参考资料模式（v0.2.6）
+    int perFileBudget() const;
+    int globalBudget() const;
+    int contextReserve() const;
+    double fileAggregateWeight() const;
+    int fallbackContextWindow() const;
 
     QString embeddingProviderId() const;
     QString embeddingModelId() const;
@@ -158,6 +175,12 @@ public:
     void setFtsFallback(bool value);
     void setChunkSize(int value);
     void setChunkOverlap(int value);
+    // 参考资料模式（v0.2.6）
+    void setPerFileBudget(int value);
+    void setGlobalBudget(int value);
+    void setContextReserve(int value);
+    void setFileAggregateWeight(double value);
+    void setFallbackContextWindow(int value);
 
     // ---- 服务配置 ----
     Q_INVOKABLE QVariantList embeddingProviderOptions() const;
@@ -217,6 +240,7 @@ private:
     ProviderCatalog *m_catalog = nullptr;
     SecureStore *m_secure = nullptr;
     AiConfigStore *m_aiConfig = nullptr;
+    DocumentStore *m_documentStore = nullptr;
 
     std::unique_ptr<LibraryManager> m_files;
     std::unique_ptr<CollectionManager> m_collections;

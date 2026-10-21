@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.21)
 
 project(MeowAi
-    VERSION 0.2.5
+    VERSION 0.2.6
     DESCRIPTION "MeowAi - 本地优先的 AI 助理客户端"
     LANGUAGES CXX
 )
@@ -34,6 +34,7 @@ add_library(MeowAiLib STATIC
     core/library/LibraryController.cpp
     core/library/LibraryFileKinds.cpp
     core/library/LibraryIndexer.cpp
+    core/library/DocumentMeta.cpp
     core/library/LibraryManager.cpp
     core/library/CategoryManager.cpp
     core/library/BackupManager.cpp
@@ -50,10 +51,15 @@ add_library(MeowAiLib STATIC
     core/library/extract/PptxExtractor.cpp
     core/library/extract/VideoExtractor.cpp
     core/library/extract/XlsxExtractor.cpp
+    core/retriever/BudgetCalculator.cpp
     core/retriever/ChunkSplitter.cpp
     core/retriever/EmbeddingService.cpp
+    core/retriever/FullTextAssembler.cpp
     core/retriever/RagRetriever.cpp
     core/retriever/NullRetriever.cpp
+    core/retriever/SectionPicker.cpp
+    core/retriever/InjectionPlanner.cpp
+    core/retriever/FileLevelRetriever.cpp
     core/skill/SkillRegistry.cpp
     core/theme/ThemeManager.cpp
     core/theme/ThemePresetManager.cpp
@@ -79,6 +85,7 @@ add_library(MeowAiLib STATIC
     storage/AiConfigStore.cpp
     storage/ChatStore.cpp
     storage/Database.cpp
+    storage/DocumentStore.cpp
     storage/LibraryConfigStore.cpp
     storage/LibraryStore.cpp
     storage/PersonalizationStore.cpp
@@ -115,6 +122,12 @@ qt_add_executable(MeowAi main.cpp)
 # 阶段三修复：GUI 子系统。Windows 下不再弹出控制台窗口，也不会出现
 # 「关掉命令行 demo 才结束」的现象；--smoke-test 仍以退出码供 CI 判定。
 set_target_properties(MeowAi PROPERTIES WIN32_EXECUTABLE TRUE)
+
+# exe 图标（v0.2.6 交付）：资源管理器 / 任务栏 / 快捷方式读取 exe 内嵌图标，
+# 既不依赖 DLL 也不需要额外文件；安装包图标由 scripts/MeowAi.iss 的 SetupIconFile 指定。
+if(WIN32)
+    target_sources(MeowAi PRIVATE resources/branding/MeowAi.rc)
+endif()
 
 # 设计令牌 Theme.qml 是 QML 单例：必须显式声明为 singleton，
 # 否则生成的 qmldir 会把它当成普通类型，Theme.<token> 全部解析为 undefined。
@@ -183,6 +196,15 @@ qt_add_resources(MeowAi "pricing"
     BASE resources
     FILES
         resources/pricing.json
+)
+
+# 应用图标（v0.2.6 交付）：运行期路径 ":/branding/app.png"，供 main.cpp 设置窗口图标。
+# 无边框窗口在任务栏/Alt+Tab 的图标取自 QWindow::icon，不设置会退回 Qt 默认图标。
+qt_add_resources(MeowAi "branding"
+    PREFIX "/branding"
+    BASE resources/branding
+    FILES
+        resources/branding/app.png
 )
 
 # 可执行程序是 QML 宿主：Multimedia 仅用于 QML 侧开屏视频播放（功能 #11），

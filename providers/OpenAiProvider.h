@@ -50,8 +50,13 @@ private:
     NetworkTransport::Request auxRequest(const QString &path, const QString &method) const;
     /// 结束校验：以三态结论回传
     void finishValidation(CredentialStatus status, const QString &message);
-    /// 解析 `GET /models` 响应体里的模型 id
+    /// 解析 `GET /models` 响应体里的模型 id，同时记录厂商给出的上下文窗口
     QStringList parseModelIds() const;
+
+public:
+    QHash<QString, int> modelContextWindows() const override { return m_modelContextWindows; }
+
+private:
 
     /// 把一次工具调用的 JSON 记入（流式按 index 拼接、非流式整包写入）
     void accumulateToolCall(const QJsonObject &object);
@@ -66,6 +71,8 @@ private:
     int m_handle = 0;          ///< 对话请求句柄，0 表示无
     int m_validateHandle = 0;  ///< Key 校验句柄
     int m_modelsHandle = 0;    ///< 模型清单拉取句柄
+    /// 厂商在 `/models` 里返回的上下文窗口（模型 id → tokens）；多数国内厂商不返回
+    mutable QHash<QString, int> m_modelContextWindows;
     QByteArray m_auxBody;      ///< 校验 / 清单请求的响应体
     bool m_auxIsGet = false;   ///< 辅助请求是否为 GET（决定校验语义）
 

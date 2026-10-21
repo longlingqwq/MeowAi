@@ -42,12 +42,18 @@ Popup {
         modelList.scrollToCurrent()
     }
 
-    /// 在触发器下方弹出，并尽量不出右边界
+    /// 在触发器下方弹出；下方放不下时自动翻到上方，并整体夹在窗口内
     function openAt(anchorItem, hostItem) {
         refresh()
+        menu.hostItem = hostItem
         const point = anchorItem.mapToItem(hostItem, 0, anchorItem.height + 6)
-        x = Math.max(8, Math.min(point.x, hostItem.width - width - 8))
-        y = Math.max(8, point.y)
+        const popupWidth = Math.min(menu.implicitWidth, hostItem.width - 16)
+        const popupHeight = Math.min(menu.implicitHeight, hostItem.height - 16)
+        x = Math.max(8, Math.min(point.x, hostItem.width - popupWidth - 8))
+        let top = point.y
+        if (top + popupHeight > hostItem.height - 8)
+            top = point.y - anchorItem.height - 12 - popupHeight
+        y = Math.max(8, top)
         open()
     }
 
@@ -66,9 +72,14 @@ Popup {
     property var modelIds: []
     property var modelLevels: []
     property var modelVision: []
+    /// 弹层宿主（窗口根 Item）：用于把弹层尺寸与位置夹在可视范围内
+    property var hostItem: null
 
     implicitWidth: 470
     implicitHeight: body.implicitHeight + Theme.s4 * 2
+    // 窗口小/矮时整体收缩，超出的内容交给内部滚动，避免弹层底部被屏幕裁掉
+    width: hostItem ? Math.min(implicitWidth, hostItem.width - 16) : implicitWidth
+    height: hostItem ? Math.min(implicitHeight, hostItem.height - 16) : implicitHeight
     padding: 0
     modal: false
     focus: true
@@ -89,15 +100,25 @@ Popup {
         }
     }
 
-    Column {
-        id: body
-        anchors.left: parent.left
-        anchors.right: parent.right
-        anchors.top: parent.top
-        anchors.topMargin: Theme.s4
-        anchors.leftMargin: Theme.s4
-        anchors.rightMargin: Theme.s4
-        spacing: Theme.s3
+    // 内容区可滚动：窗口较矮时不会被裁掉下半部分（模型清单、高级参数都能滚到）
+    Flickable {
+        id: flick
+        anchors.fill: parent
+        anchors.margins: Theme.s4
+        clip: true
+        contentWidth: width
+        contentHeight: body.implicitHeight
+        boundsBehavior: Flickable.StopAtBounds
+
+        ScrollBar.vertical: ScrollBar {
+            policy: ScrollBar.AsNeeded
+            width: 6
+        }
+
+        Column {
+            id: body
+            width: flick.width
+            spacing: Theme.s3
 
         // ------------------------------------------------------------ 头部
         Item {
@@ -118,12 +139,14 @@ Popup {
                 MChip {
                     tone: "accent"
                     text: Chat.providerId
+                    maxWidth: 120
                     anchors.verticalCenter: parent.verticalCenter
                 }
 
                 MChip {
                     tone: "neutral"
                     text: Chat.modelId.length > 0 ? Chat.modelId : qsTr("未选择模型")
+                    maxWidth: 160
                     anchors.verticalCenter: parent.verticalCenter
                 }
             }
@@ -347,6 +370,7 @@ Popup {
             MChip {
                 tone: "neutral"
                 text: qsTr("当前生效：%1").arg(JSON.stringify(Chat.effectiveParams()))
+                maxWidth: Math.max(90, body.width * 0.45)
                 anchors.verticalCenter: parent.verticalCenter
             }
 
@@ -425,6 +449,7 @@ Popup {
             color: Theme.textGhost
             font.pixelSize: Theme.fLabel
             wrapMode: Text.Wrap
+        }
         }
     }
 }

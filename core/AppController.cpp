@@ -5,8 +5,12 @@
 #include "core/chat/ChatHistoryModel.h"
 #include "core/library/LibraryController.h"
 #include "core/retriever/EmbeddingService.h"
+#include "core/retriever/FileLevelRetriever.h"
+#include "core/retriever/FullTextAssembler.h"
+#include "core/retriever/InjectionPlanner.h"
 #include "core/retriever/NullRetriever.h"
 #include "core/retriever/RagRetriever.h"
+#include "core/retriever/SectionPicker.h"
 #include "core/skill/SkillRegistry.h"
 #include "core/theme/ThemeManager.h"
 #include "core/theme/ThemePresetManager.h"
@@ -19,6 +23,7 @@
 #include "storage/AppPaths.h"
 #include "storage/ChatStore.h"
 #include "storage/Database.h"
+#include "storage/DocumentStore.h"
 #include "storage/LibraryConfigStore.h"
 #include "storage/LibraryStore.h"
 #include "storage/PersonalizationStore.h"
@@ -219,19 +224,28 @@ void AppController::initialize()
     m_ragRetriever = std::make_unique<RagRetriever>(m_libraryStore.get(), m_vectorIndex.get(),
                                                     m_embeddingService.get());
 
+    // 资料库（v0.2.6）：参考资料模式（文件级召回 + 三级注入）
+    m_documentStore = std::make_unique<DocumentStore>(m_database.get());
+    m_fullTextAssembler = std::make_unique<FullTextAssembler>(m_libraryStore.get());
+    m_sectionPicker = std::make_unique<SectionPicker>(m_documentStore.get());
+    m_injectionPlanner = std::make_unique<InjectionPlanner>(
+        m_libraryStore.get(), m_documentStore.get(),
+        m_fullTextAssembler.get(), m_sectionPicker.get());
+    m_fileLevelRetriever = std::make_unique<FileLevelRetriever>(
+        m_injectionPlanner.get(), m_documentStore.get());
+
     // AI 接入（功能 #3 / #4）：对话控制器，Key 只从 SecureStore 读取，历史经会话模型
     m_chat = std::make_unique<ChatController>(m_secureStore.get(), m_chatHistory.get(),
                                               m_providerCatalog.get(), m_aiConfigStore.get(),
                                               m_webConfigStore.get(), m_webSearch.get());
     m_chat->attachLibrary(m_libraryStore.get(), m_ragRetriever.get(),
-                          m_libraryConfigStore.get());
+                          m_libraryConfigStore.get(), m_fileLevelRetriever.get());
 
-    // 资料库 QML 门面（v0.2.5 · M7）：由它统一配置 embedding / caption 与挂载列表，
-    // AppController 只负责装配与把「挂载变更」同步给对话控制器
+    // 资料库 QML 门面（v0.2.5 · M7 + v0.2.6 文件级召回）：由它统一配置 embedding / caption 与挂载列表
     m_libraryController = std::make_unique<LibraryController>(
         *m_paths, m_libraryStore.get(), m_libraryConfigStore.get(), m_embeddingService.get(),
         m_vectorIndex.get(), m_ragRetriever.get(), m_providerCatalog.get(), m_secureStore.get(),
-        m_aiConfigStore.get(), this);
+        m_aiConfigStore.get(), m_documentStore.get(), this);
     connect(m_libraryController.get(), &LibraryController::mountChanged, this, [this] {
         if (!m_chat || !m_libraryController)
             return;

@@ -99,13 +99,22 @@ ChunkSplitOptions ChunkSplitter::options() const
 }
 
 QList<ChunkRecord> ChunkSplitter::split(qint64 fileId,
-                                         const QList<ExtractedSegment> &segments) const
+                                         const QList<ExtractedSegment> &segments,
+                                         QList<HeadingSpan> *outHeadings) const
 {
     QList<ChunkRecord> chunks;
     int ordinal = 0;
     for (const ExtractedSegment &segment : segments) {
         if (normalizeText(segment.text).isEmpty()) {
             continue;  // 空片段不入库，避免产生无意义的零字块
+        }
+        // 标题：记录它落在哪个片段序号上，章节区间据此划分
+        if (outHeadings && segment.headingLevel > 0) {
+            HeadingSpan span;
+            span.ordinal = ordinal;
+            span.level = segment.headingLevel;
+            span.title = segment.text.trimmed();
+            outHeadings->append(span);
         }
         if (isTableSegment(segment)) {
             splitTable(fileId, segment, &chunks, &ordinal);

@@ -66,3 +66,7 @@ aqtinstall.log
 
 # ---- Local test/temp databases ----
 .tmpdb/
+
+# ---- Packaging output (installer artifacts) ----
+/dist/
+/产品/

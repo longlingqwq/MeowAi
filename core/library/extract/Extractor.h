@@ -66,6 +66,10 @@ struct ExtractedSegment
     QString locSheet;                   ///< 工作表名（不适用为空）
     int locRowFrom = 0;                 ///< 行区间起（1 起、含；不适用为 0）
     int locRowTo = 0;                   ///< 行区间止（含；不适用为 0）
+    /// 标题层级（1–6）；0 表示普通正文。
+    /// 仅 docx（段落样式 HeadingN / outlineLvl）与 markdown（`#` 前缀）会置位，
+    /// 供索引阶段切分章节；不落库、不进入注入正文。
+    int headingLevel = 0;
 };
 
 /**

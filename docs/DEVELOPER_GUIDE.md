@@ -1,289 +1,315 @@
-# MeowAi 开发人员手册
+# MeowAi 开发 / 运维 / 销售参考手册
 
-> 版本：**v0.2.5**（阶段二收尾）
-> 读者：本项目 3 名开发者及其 Agent
-> 规范优先级：`PROJECT_CHARTER.md` > 本手册 > 其他文档；规范冲突以 Charter 为准。
+> 版本：**v0.2.6**
+> 读者：运维人员、销售人员、新加入的开发人员，以及需要了解产品原理的同事。
+> 特点：**尽量少讲代码**，重点讲"它是什么、怎么工作、怎么部署、出问题怎么查、能卖什么"。
+> 更严格的工程规范仍以 `PROJECT_CHARTER.md` 为准；进度细节见 `DEVLOG.md`。
 
 ---
 
-## 1. 快速开始
+## 1. 一句话理解产品
+
+MeowAi 是一个**小圈子共享、本地优先的 AI 助理客户端**：
+- 每个人在自己电脑上使用，**各有一份独立数据**，没有账号体系；
+- AI 能力通过用户自己填写的厂商 API 获得（不内置本地大模型）；
+- 独有的"资料库"能把用户自己的文件变成 AI 的参考书，并给出可核对的来源。
+
+**目标用户**：需要让 AI 理解自己专业资料的个人与小团队，例如物业工程、项目管理、法务、行政等。
+
+---
+
+## 2. 产品由哪几块组成（用开店的比喻）
+
+```
+界面（ui）         → 店面：顾客看到和操作的部分
+业务编排（core）   → 店长：决定这次要做什么、按什么顺序做
+模型接入（providers）→ 外送员：唯一负责出门和厂商打交道的人
+存储（storage）    → 仓库：数据库、配置、密钥、资料
+系统能力（platform）→ 门卫：加密、路径、窗口标题栏等系统能力
+```
+
+三条"店规"（开发同事必须知道）：
+1. 店面不直接进仓库、也不直接出门——一切经店长转交。
+2. 所有对外网络请求只能走"外送员"这一层，方便统一处理超时、限流和错误。
+3. 涉及系统加密、窗口消息等平台能力，只能在"门卫"这一层做。
+
+这样拆分的好处：换 AI 厂商、换存储方式、换界面时，其他部分不用跟着大改。
+
+---
+
+## 3. 功能地图与用户价值
+
+| 功能 | 解决什么问题 | 一句话介绍（销售可用） |
+|---|---|---|
+| 多厂商 AI 接入 | 用户不想被单一厂商绑定 | "主流国内模型都能接，也能填自己的接口" |
+| 模型 + 思考档位 | 不同任务需要不同速度/深度 | "同一句话，可以选快速回答或深度思考" |
+| 密钥校验 | 用户不知道 Key 配得对不对 | "填完就能验证，是错 Key 还是网络问题一目了然" |
+| 本地会话历史 | 关掉就丢记录很难用 | "历史都在自己电脑里，重启还在" |
+| 资料库（小库） | 通用 AI 不懂用户自己的文件 | "把你的规范、台账变成 AI 的参考书" |
+| 参考资料模式 | 只给零散片段会丢细节 | "小文件整份读，大文件按章节读，预算不够才退片段" |
+| 引用来源 | 回答不可核对就不敢用 | "每句话来自哪个文件、第几页都能看到" |
+| 联网搜索 | 模型知识有截止日期 | "需要最新信息时可以自行上网查" |
+| 加密存储 | Key 泄露风险 | "密钥用系统级加密保存，不写明文" |
+| 主题 / 个性化 | 工具也要顺手好看 | "字体、背景、头像、开屏都能换" |
+
+### 3.1 不夸大：这些目前做不到
+- 不做本地大模型，**必须联网并自备 API Key**。
+- 不解析视频；扫描版 PDF（图片型）不做 OCR。
+- 资料库**只读**，AI 不会改用户文件。
+- 不支持多端同步；每台电脑各自一份数据。
+- 不是"全自动 Agent"，不会自主操作文件系统。
+
+---
+
+## 4. 核心功能原理（通俗版）
+
+### 4.1 AI 接入：为什么必须填 Key
+MeowAi 自己不生产智能，它像一个"点餐台"：用户选厂商和型号，MeowAi 把对话打包成厂商要求的格式发过去，再把流式返回的字显示出来。
+- 绝大多数国内厂商都兼容 OpenAI 协议，所以**共用同一套实现**，只是地址、鉴权头、模型名不同；这些差异全部写在 `resources/providers.json` 里。
+- 新增一家厂商，通常**只改这个 JSON**，不改程序代码。
+- **豆包不在接入范围**（产品决策）。
+- 自定义厂商：用户可自己填 API 地址、模型名和 Key。
+
+**重要概念：大模型接口是"无记忆"的。** 每次提问，软件都要把历史对话和资料重新发一遍。所谓"它记得上文"，是软件每次替它带上上文。因此：
+- 对话越长，费用越高；
+- 资料库每次都会重发相关内容（无法"只发一次"）；
+- 厂商的"提示词缓存"能降低重复部分的费用，但无法改变"必须重发"这件事。
+
+### 4.2 密钥校验的三种结果
+- **401 / 403** → 密钥无效（真的错了）。
+- **429（限流）、超时、断网** → **无法验证**，不能判成"Key 错误"。
+- 正常返回 → 密钥有效。
+这条规则是为了避免用户被误导去反复换 Key。
+
+### 4.3 资料库：从文件到"可被 AI 使用的参考书"
+1. **入库**：把文件复制进库，或只记录外部文件夹的引用。
+2. **解析**：把 PDF / Word / Excel / PPT 等抽出纯文本，并记录页码、工作表、行号等位置信息。
+3. **切块**：把长文本切成带重叠的小段（chunk），避免一句话被切断。
+4. **建索引**：
+   - 有 embedding 服务时，把每段文字变成"语义坐标"（向量），按意思相近程度检索；
+   - 没有 embedding 时，自动退回**关键词检索**（本地全文索引），仍可用，但不够聪明。
+5. **图片**：不本地识别，而是调用视觉模型生成一段文字描述，描述参与检索（需用户同意外发）。
+6. **检索**：用户提问 → 找相关片段 → 过滤低分 → 每文件限量 → 补上下文 → 按预算截断。
+7. **引用**：把命中的文件与位置记录下来，显示在回答下方。
+
+### 4.4 参考资料模式：三级注入
+v0.2.6 起，检索不再只是"塞几段片段"，而是先定位**文件**，再决定给多少：
+
+| 级别 | 触发条件 | 用户看到 |
+|---|---|---|
+| 全文 | 文件估算 token ≤ 单文件预算 | "全文" |
+| 章节 | 文件太大，但能挑出相关章节 | "章节"，结构不清晰时标"近似章节" |
+| 片段 | 章节也放不下 / 没有章节结构 | "片段"，超预算标"已截断" |
+
+预算有三层保护：
+1. **单文件预算**（默认 20000 tokens）：防止一个超大文件吃掉全部上下文；
+2. **全局预算**（默认 100000 tokens）：本轮所有文件合计上限；
+3. **模型上下文窗口**：先扣掉历史对话与回答预留，再把预算压到安全范围。厂商接口不返回窗口时，用"未知窗口估算值"（默认 32768）。
+
+**提示词语义是"仅供参考"**：资料是参考，不是命令。资料里没有时，AI 应说明，而不是硬编；它也可以结合自身知识或联网结果。
+
+### 4.5 联网搜索
+两种方式并存：
+- 软件先搜、抓取前几条网页正文，再交给模型；
+- 厂商支持工具调用时，由模型自己决定搜索与抓取（有轮数上限）。
+搜索失败不影响正常回答，只会降级。
+
+### 4.6 安全与隐私
+- API Key 存在本机**加密保险库**：Windows 使用系统 DPAPI；没有加密能力的平台会**明确拒绝保存**，绝不降级明文。
+- 日志不打印 Key、完整请求体、完整文件内容。
+- 图片上传、资料外发、首次启用资料库都要用户**显式同意**，可撤回。
+- 删除小库或解除关联**只删索引，不删原文件**。
+
+### 4.7 主题与个性化
+界面颜色来自一套"主题令牌"，换主题就是替换一套令牌值，不用改界面文件。
+个性化只读写配置里的 `personalization` 段，保存失败会回滚，避免界面显示与磁盘不一致。
+
+---
+
+## 5. 部署与分发（运维同事重点看）
+
+### 5.1 用户拿到什么
+- 一个安装包：`MeowAi-Setup-0.2.6.exe`（约 32 MB）。
+- 双击安装即可，**不依赖 Qt、不需要管理员权限**，Qt 运行库与 PDF 解析库已随包携带。
+- 默认安装目录：`%LOCALAPPDATA%\Programs\MeowAi`。
+- 支持 Windows 10 / 11 64 位。
+
+### 5.2 用户数据在哪里
+`%APPDATA%\MeowAi\MeowAi\`
+
+| 内容 | 文件/目录 |
+|---|---|
+| 模型选择、检索参数、挂载关系 | `config.json` |
+| API Key（加密） | `secure\` |
+| 资料库文件副本 | `library\` |
+| 字体 / 背景 / 头像 / 视频 | `assets\` |
+| 会话、索引、向量 | 同目录数据库文件 |
+
+### 5.3 备份、迁移、重置
+- **备份**：关闭软件，复制整个数据目录。
+- **迁移**：把数据目录放到新电脑同一位置；Key 受 Windows 用户加密保护，通常需要重新填一次。
+- **重置**：关闭软件后删除数据目录（会丢失会话与索引，原文件若为"关联文件夹"方式则不受影响）。
+
+### 5.4 如何自己重新打包（开发/运维）
+前置：Visual Studio 2022、Qt 6.8.3（msvc2022_64）、Inno Setup 6。
 
 ```powershell
-# 配置（Windows，Visual Studio + Qt 6.5+）
+# 1) 构建 Release
 cmake -S . -B build
+cmake --build build --config Release
 
-# 可选：启用 PDF 文本层解析（PDFium 预编译产物，仓库不含二进制）
-pwsh scripts/fetch-pdfium.ps1
-cmake -S . -B build     # 重新配置以链接 PDFium
+# 2) 复制产物并补齐 Qt 运行库
+mkdir dist\MeowAi
+copy build\Release\MeowAi.exe dist\MeowAi\
+copy build\Release\pdfium.dll dist\MeowAi\
+C:\Qt\6.8.3\msvc2022_64\bin\windeployqt.exe --release --compiler-runtime --qmldir ui dist\MeowAi\MeowAi.exe
 
-# 构建 / 测试
-cmake --build build --config Debug
-ctest --test-dir build -C Debug --output-on-failure
+# 3) 生成安装包
+"C:\Users\<你>\AppData\Local\Programs\Inno Setup 6\ISCC.exe" scripts\MeowAi.iss
 ```
 
-- 可执行产物：`build/Debug/MeowAi.exe`
-- 冒烟自检：`MeowAi.exe --smoke-test`（退出码 0 为通过）
-- 当前测试规模：**22 个测试目标，全部通过**（总代理实测 22/22）
+产物：`dist\MeowAi-Setup-<版本>.exe`。
+`scripts\MeowAi.iss` 里可以改版本号、安装目录、是否创建桌面图标。
 
-依赖组件：`Core Gui Qml Quick Network Sql Test Multimedia QuickControls2`。
-`Multimedia` 与 `QuickControls2` **只链接可执行程序，不进 core 层**。
+> 发版前建议在一台**没装过 Qt** 的电脑上安装并启动一次，确认不缺少运行库。
+
+### 5.5 升级与卸载
+- 升级：直接运行新版本安装包覆盖安装，用户数据保留。
+- 卸载：Windows 设置里卸载；数据目录不会自动删除。
 
 ---
 
-## 2. 分层与依赖方向（硬约束）
+## 6. 运维排查手册
 
-```
-ui/        (QML，纯展示与绑定)
-  ↓ 只能通过 App / Chat / Library 等上下文属性
-core/      (业务编排：chat / library / retriever / web / theme / skill / update)
-  ↓
-providers/ (AI 协议、SSE、网络传输、Provider 工厂)   ← 唯一出网层
-storage/   (SQLite、配置、密钥、主题、资料库持久化)
-platform/  (DPI/路径/加密原语/标题栏 等系统能力)
-```
+### 6.1 五分钟体检清单
+1. 软件能启动、窗口完整显示。
+2. 厂商、模型已选择。
+3. 点「验证」能返回"密钥有效"。
+4. 「拉取清单」失败不影响使用（内置清单兜底）。
+5. 资料库文件状态是否为「已索引」。
+6. 若用资料库，embedding（和图片用的视觉模型）是否已配置。
+7. 提问能正常流式返回；断开网络时应给出明确错误而不是卡死。
 
-规则：
-- **QML 不直连存储与网络**；业务一律经 `AppController` 注入的上下文属性转发。
-- **所有 HTTP 必须经 `providers/NetworkTransport`**（生产 `QNetworkTransport`，单测注入 `tests/fakes/FakeNetworkTransport.h`）。
-- 系统级操作（DPAPI、Keystore、Win32 消息）只允许在 `platform/`。
-- 新增第三方依赖（如 PDFium）**默认只进可执行程序或特定层**，不得污染 core。
+### 6.2 常见故障对照表
 
----
-
-## 3. 模块地图
-
-### 3.1 core
-
-| 模块 | 关键类 | 职责 |
+| 现象 | 最可能原因 | 处理 |
 |---|---|---|
-| 组合根 | `AppController` | 装配全部子系统，向 QML 注入 `App/Chat/Library/Personalize` 等 |
-| 对话 | `ChatController`、`ChatHistoryModel` | 组装请求、流式增量、会话切换、检索/工具上下文注入 |
-| AI 目录 | `ai/ProviderCatalog` | 读取 `resources/providers.json`，厂商/模型/能力/思考档位 |
-| 资料库 | `LibraryController`、`CollectionManager`、`LibraryIndexer`、`LibraryManager` | 小库、导入、关联文件夹、索引编排、状态机 |
-| 解析 | `library/extract/*`、`ExtractorRegistry` | 注册式 extractor：txt/md/csv/json/pdf/docx/xlsx/pptx/image/video(占位) |
-| 检索 | `RagRetriever`、`ChunkSplitter`、`EmbeddingService`、`DocumentRetriever` | 向量 + 关键词混合检索、上下文组装 |
-| 图片 | `ImageCaptionService`、`ImageCaptionExtractor`、`ImageTranscoder` | 多模态描述入库、格式转码 |
-| 成本 | `CostEstimator` | 首次建索引 / 每轮注入的成本估算 |
-| 联网 | `WebSearchService`、`HttpWebSearchProvider`、`WebSearchTool` | 应用侧检索抓取；部分厂商支持模型工具调用循环 |
-| 主题 | `ThemeManager`、`ThemePresetManager` | 主题令牌驱动、预设加载 |
-| Skill | `Skill`、`SkillRegistry` | **接口与扫描已就绪，调用尚未接入对话** |
-| 升级 | `UpdateManager` | **骨架，未实现** |
+| 安装包双击无反应 | 安全软件拦截 / SmartScreen | 允许运行；换一台电脑确认 |
+| 启动提示缺少 DLL | 运行库未随包 | 用 windeployqt 重新打包 |
+| 验证失败但 Key 没错 | 429 限流、超时、断网 | 稍后重试或检查代理 |
+| 对话 401/403 | Key 无效或无权限 | 重新保存正确 Key |
+| 模型下拉为空 | 厂商未选 / 清单未加载 | 重选厂商；点拉取清单 |
+| 回答特别慢 | 厂商限流 / 高档位思考 / 预算太大 | 换模型、降档位、减预算 |
+| 资料库检索不到 | 未挂载 / 不是"已索引" / 没配 embedding / 阈值过高 | 逐项检查，重建索引 |
+| PDF 一直无文本层 | 扫描件 | 暂不支持，需先转文字层 |
+| 图片一直待索引 | 视觉模型未配 / 未同意外发 / webp 插件缺失 | 配置并同意，或换格式 |
+| 关联文件夹内容没更新 | 快照过期 | 点「重建快照」 |
+| 界面偶发卡顿 | 大文件解析在界面线程 | 已知限制，见 §8 |
+| 换电脑后 Key 失效 | Windows 用户加密绑定 | 重新填写 Key |
 
-### 3.2 providers
-
-| 类 | 说明 |
-|---|---|
-| `AiProvider` | 纯抽象：`sendChat`（流式）、`cancel`、能力声明 |
-| `OpenAiProvider` | OpenAI 协议；同时承载所有 **OpenAI 兼容厂商**（DeepSeek/Qwen/Kimi/GLM/自定义） |
-| `AnthropicProvider` | Anthropic Messages 协议 |
-| `ProviderFactory` | 按 `protocol` 路由，返回 `std::unique_ptr<AiProvider>` |
-| `ProviderCatalog` | 厂商与模型清单（JSON 数据驱动） |
-| `SseStreamParser` | SSE 增量解析（OpenAI `choices[].delta` / Anthropic `content_block_delta`） |
-| `NetworkTransport` | 统一出网抽象 + 可注入 fake |
-| `ProviderUtils` | 鉴权头、错误归一化（401/403 → 无效；429/超时/断网 → 无法验证） |
-
-### 3.3 storage
-
-| 类 | 说明 |
-|---|---|
-| `Database` | schema 建表 + 版本迁移；**唯一 SQLite 入口** |
-| `ChatStore` | 会话与消息 CRUD、streaming 消息 finalize / 降级 partial |
-| `LibraryStore` | 小库、文件、关联、文件夹快照、chunk、citation、检索日志 |
-| `SqliteVectorIndex` | 向量 BLOB 读写 + 余弦计算（`VectorIndex` 接口可替换） |
-| `SecureStore` | 加密保险库 `<AppData>/secure/<key>.vault`，Key 名白名单 + 原子写 |
-| `AiConfigStore` / `LibraryConfigStore` / `PersonalizationStore` / `ThemeStore` / `WebConfigStore` | 各自配置段，写入时**保留其他段** |
-| `AppPaths` | 所有本地路径的唯一来源 |
-
-### 3.4 ui
-
-`main.qml`（外壳/导航/标题栏/开屏）、`ConversationPage`、`LibraryPage`、`PersonalizationPage`、
-`TitleBar`、`SplashVideo`、`LibraryConsent`、`WebSearchPanel`、`ModelMenu`，以及 `M*` 自绘组件库与 `Theme.qml`。
+### 6.3 给用户收集信息时的建议
+请用户提供：操作步骤、界面提示原文、发生时间、是否使用代理、所选厂商与模型。
+**不要**让用户直接粘贴 API Key；日志与截图里也不应出现完整 Key。
 
 ---
 
-## 4. 数据库结构（schema v1）
+## 7. 进度与路线
 
-| 表 | 用途 |
-|---|---|
-| `conversations` | 会话（标题、时间） |
-| `messages` | 消息（role、内容、状态 streaming/complete/partial/error） |
-| `message_attachments` | 消息附图 |
-| `collections` | 小库 |
-| `library_files` | 文件（来源 upload/linked、状态、mtime、hash、错误） |
-| `file_collections` | 文件↔小库 多对多 |
-| `folder_links` | 关联文件夹（快照时间） |
-| `chunks` | 片段（文本、序号、元数据：页码/工作表/行号/图片序号） |
-| `chunk_vectors` | 向量（BLOB、模型、维度） |
-| `citations` | 检索引用（会话/消息 ↔ 片段） |
-| `chunk_fts` (FTS5) | 关键词兜底索引 |
-
-> 所有写入走 `Database`；**不要**在业务层直接开 `QSqlDatabase`。
-
----
-
-## 5. 关键链路
-
-### 5.1 对话
-```
-QML 发送 → ChatController
-  ├─ 组装 system（当前时间，每轮现算，不入库）
-  ├─ 若挂载小库 → RagRetriever 检索 → 注入上下文 + 记录 citations
-  ├─ 若开启联网 → 支持工具调用的厂商进入工具循环
-  ├─ ProviderFactory → OpenAiProvider / AnthropicProvider → NetworkTransport
-  └─ SSE 流式 delta → ChatHistoryModel → ChatStore（节流落库）→ QML
-```
-
-### 5.2 资料库入库
-```
-导入 / 关联快照 → LibraryIndexer
-  → ExtractorRegistry 选择 extractor（文本 / 图片 caption）
-  → 结构化文本 + 元数据
-  → ChunkSplitter（尺寸 + 重叠）
-  → EmbeddingService（API）→ SqliteVectorIndex
-  → FTS5 同步
-状态机：待索引 → 已索引 / 待建向量 / 待索引(图片) / 无文本层 / 索引失败 / 内容已变化
-```
-
-### 5.3 检索
-```
-query → (embedding) → 余弦 Top-N 候选
-      → 阈值过滤 → 每文件上限 → 邻居扩展 → token 预算截断 → 引用
-      ↘ embedding 不可用 → FTS5 关键词（hybrid 可合并）
-输出 RetrievalResult{mode, degraded, note, vectorHits, keywordHits, tokenEst}
-```
-
----
-
-## 6. 各功能原理与注意事项
-
-### 6.1 AI 接入 / 多厂商
-**原理**：`resources/providers.json` 描述厂商 `{id, displayName, baseUrl, authStyle, protocol, models[]}`。
-`protocol=openai` 的全部复用 `OpenAiProvider`，**新增厂商 = 加一条 JSON**；`protocol=anthropic` 走 `AnthropicProvider`。
-
-**注意**：
-- 模型能力（vision / reasoning 档位）由 catalog 声明；**未声明的档位不得猜测**，UI 显示"未声明"。
-- `reasoningLevel` 映射到厂商原生字段；高级参数可透传覆盖。
-- Key 校验三态：**401/403 = 无效**；429/超时/断网 = **无法验证**——不得混为一谈。
-- 模型清单可动态拉取，但**内置清单是兜底**，拉取失败不能报错。
-- 旧配置里的自由 `model` 字符串必须能平滑迁移。
-
-### 6.2 安全存储
-Windows 用 DPAPI（用户作用域 + 应用熵）；Android 用 KeyStore AES-256-GCM（`#if Q_OS_ANDROID`）。
-**平台无加密能力时明确拒绝写入，绝不降级明文**。`isAvailable()` 只表示"具备真实加密能力"。
-日志**禁止**打印 Key、完整请求体、完整文件内容。
-
-### 6.3 RAG 参数
-`RetrievalConfig` 默认：`topK=6`、`perFileLimit=2`、`tokenBudget=2000`、
-`similarityThreshold=0.30`、`neighborRadius=1`、`ftsFallback=true`、`maxCandidates=60`。
-**这些参数改动后行为必须改变**（DoD 验收点，已有测试）。
-
-**注意**：
-- **每文件上限**用于防止大文件霸榜；**邻居扩展**用于补回被切断的语义。
-- token 估算为保守近似，不是精确 tokenizer。
-- 引用必须能定位到**文件名 + 页码/工作表/行号/图片序号**。
-- 检索失败**不得中断对话**，只能降级并提示。
-
-### 6.4 图片
-图片**不做本地解析**：入库时调多模态模型生成描述（caption），描述参与切块与检索。
-需**同时满足**：已配置视觉模型 + 已同意图片外发 + 模型声明 `vision`。
-`.webp` 依赖 Qt imageformats 插件，缺失时会失败——需明确报错，不得静默。
-
-### 6.5 联网搜索
-两种形态并存：
-- **A 形态**：应用侧 `WebSearchService` 先检索、抓取前 2 条正文，再拼进上下文。
-- **B 形态**：厂商支持工具调用时，模型自主发起 `search/fetch`（有最大轮数上限）。
-注意：`WebSearchProvider` 与 `DocumentRetriever` **刻意分离**（公网 vs 本地资料库），不要合并类型。
-
-### 6.6 主题
-`ui/Theme.qml` 令牌**可变**，由 `ThemePresetManager` 用 `setProperty` 驱动；预设是 `resources/themes/*.json`。
-**令牌名是全局契约**：只能新增、不能改名；新增令牌必须同时补进所有预设。
-QML 坑：`Theme.qml` 必须在 CMake 中声明为 **QML 单例**；令牌名不能写成 `onXxx`（会被当信号处理器）。
-组件内**不得硬编码颜色**，否则换主题漏色。
-
-### 6.7 会话历史
-`ChatHistoryModel` 是 `QAbstractListModel`；流式 delta 节流写库，终局 finalize。
-启动时把残留 `streaming` 降级为 `partial`。不要在 QML 侧维护 transcript。
-
-### 6.8 个性化
-`PersonalizationStore` 只读写 `config.json` 的 `personalization` 段，读改写回**保留其他段的键**。
-资源路径必须白名单校验（拒绝绝对路径/盘符/`~`/`..`），图片 20MB、视频 200MB 上限。
-落盘失败要**回滚内存状态**。
-
-### 6.9 标题栏
-`supportsCustomTitleBar()`：Desktop=true，Android/Web=false（自动回退）。
-Windows 用 `QAbstractNativeEventFilter` 处理 `WM_NCHITTEST/NCCALCSIZE/GETMINMAXINFO`，QML 侧还有 `resizeFrame` 兜底。
-修改这块后**必须实测**：拖动、双击最大化、边缘缩放、关闭。
-
----
-
-## 7. 扩展指南
-
-### 7.1 新增厂商（OpenAI 兼容）
-1. 在 `resources/providers.json` 加一条：`id / displayName / baseUrl / authStyle / protocol:"openai" / models[]`。
-2. 为每个模型声明 `id / displayName / supportsVision / reasoningLevels`。
-3. **查官方文档确认端点与鉴权字段**，在 PR 与 DEVLOG 附出处。
-4. 加单测到 `tst_providercatalog`。
-
-### 7.2 新增模型
-只改 `providers.json`，不要改代码。
-
-### 7.3 新增解析器
-实现 `Extractor` → 在 `ExtractorRegistry` 注册 → 补 `tst_extractors`。
-元数据必须携带定位信息，否则引用不可用。
-
-### 7.4 新增主题
-在 `resources/themes/<name>.json` 按现有令牌**全量**提供，然后在 CMake 资源清单登记；`ThemePresetManager` 会自动列出，无需改代码。
-
----
-
-## 8. 测试策略
-
-- 所有出网逻辑必须可注入 `FakeNetworkTransport`。
-- 优先覆盖：**异常流**（无 Key / 错 Key / 429 / 超时 / 断网 / 损坏文件 / 非法路径 / 空查询）。
-- RAG 必须覆盖：阈值、每文件上限、邻居扩展、token 截断、降级、引用定位。
-- 安全必须覆盖：密文不含明文、非法 Key 名、平台不支持时拒绝写入。
-- 交付前至少：`ctest` 全绿 + `--smoke-test` 退出码 0 + 运行期 QML 警告为 0。
-
----
-
-## 9. 当前进度快照
-
-| 阶段 | 项目 | 状态 |
+| 阶段 | 内容 | 状态 |
 |---|---|---|
 | 一 | 架构、目录、CI、单测框架、GitHub 私有仓库 | ✅ |
-| 一 | 分支保护规则 / 飞书分发结构 | ⬜ |
-| 二 | 安全机制、个性化、AI 接入、会话历史、主题、标题栏 | ✅ |
-| 二 | AI 接入增强（多厂商/模型、思考档位、Key 校验、多模态、联网） | ✅ |
-| 二 | 资料库 / RAG（小库、导入、关联、文本+图片、向量+关键词、引用、成本、同意） | ✅（待正式验收） |
-| 二 | 防崩溃自检补齐（随各模块交付逐步覆盖） | 🟡 |
-| 三 | Skill 调用、升级（蓝奏云）、稳定性验证 | ⬜ |
-| 四 | Android / Web 适配、多端 Worktree、交付 | ⬜ |
+| 二 | 安全、个性化、AI 接入、会话历史、主题、无边框标题栏 | ✅ |
+| 二 | 资料库 / RAG（小库、导入、关联、文本+图片、检索、引用、成本、同意） | ✅ |
+| 三 | 多厂商与模型增强、联网搜索、**参考资料模式（v0.2.6）** | ✅ |
+| 三 | Skill 调用、应用内升级、稳定性验证 | ⬜ |
+| 四 | Android / Web 适配、多端协作、正式交付 | ⬜ |
 
-> 详细逐条记录见 `DEVLOG.md`（**每完成一个模块必须追加**）。
+逐条交付记录见 `DEVLOG.md`；任务拆解与验收标准见 `PLAN.md`。
 
 ---
 
-## 10. 已知限制与技术债（按优先级）
+## 8. 已知限制（不要对客户承诺不存在的功能）
 
-1. **解析在 UI 线程**：大 PDF / XLSX 会短暂卡顿。建议后续迁到工作线程。
-2. **无 rerank、无多轮检索（B 形态文件级）、无跨文件分层摘要**：跨几十个文件的综合问题命中率有限。
-3. **无自动监视文件夹**：当前"快照 + 手动重建"，源文件变化后需手动刷新。
-4. **视频未实现**：`VideoExtractor` 仅占位（返回不支持）。
-5. **扫描版 PDF 无 OCR**：显示"无文本层"。
-6. **`.webp` 依赖 imageformats 插件**：缺失时图片入库失败。
-7. **无显式代理设置**：依赖系统代理；对需要代理的厂商可能连接失败。
-8. **`.tmpdb/` 未纳入 `.gitignore`**：疑似本地测试/冒烟残留，提交前请确认并清理，避免误入库。
-9. **`scripts/fetch-pdfium.ps1` 尚未提交**：需纳入仓库（PDFium 二进制仍忽略）。
-10. **分支保护 / PR 流程未强制**：历史上多次"PR 待创建"，DoD 第 3 条未落地，需尽快配置。
-11. **文档与实现偶有滞后**：`PLAN.md` 的勾选与待定项需随交付同步更新。
-12. **Agent 式直接操作文件**（D11）仍待定；资料库当前**只读**。
+1. **解析在界面线程**：超大 PDF/Excel 导入时会短暂卡顿，后续计划移到后台线程。
+2. **无重排（rerank）/ 无跨文件汇总**：几十个文件的综合类问题，命中率仍有提升空间。
+3. **无 OCR**：扫描版 PDF 无法检索。
+4. **无视频解析**：只预留接口。
+5. **不自动监视文件夹**：采用"快照 + 手动重建"。
+6. **`.webp` 依赖插件**：个别环境可能失败。
+7. **无内置代理设置**：跟随系统代理，需代理的厂商可能连接失败。
+8. **厂商上下文窗口普遍不公开**：只能靠内置值或用户填写估算值，预算可能与真实窗口有偏差。
+9. **资料库只读**：AI 写回文件尚未启用。
+10. **单机独立**：没有账号、云同步、多人协作。
 
 ---
 
-## 11. 协作与交付流程
+## 9. 给销售 / 演示同事的 15 分钟演示脚本
 
-1. 动手前按 `docs/README.md` 顺序读规范，并读 `DEVLOG.md` 了解进度。
-2. 分支按版本号命名（如 `v0.2.5`）→ 提 PR（**必须可见 diff**）→ Review → 合并。
-3. 每完成一个模块：自测 + 异常边界测试 → 追加 `DEVLOG.md` → 更新 `PLAN.md` 勾选。
-4. 交付由**总代理**按 DoD 核验；未通过不得进入下一阶段。
-5. 删除小库/解除关联**绝不删除用户原文件**——这条必须永远有测试守着。
+1. **（1 分钟）定位**："这是一个装在自己电脑上的 AI 助手，能读你自己的资料，数据不离开本机。"
+2. **（2 分钟）首次配置**：选 DeepSeek → 选模型 → 填 Key → 点验证，展示"密钥有效"。
+3. **（2 分钟）普通对话**：问一个通用问题，展示流式回答；切换思考档位再问一次，对比速度。
+4. **（4 分钟）资料库**：
+   - 现场新建"工程用"小库，拖入一份 PDF 和一份 Excel；
+   - 展示状态从"待索引"到"已索引"；
+   - 挂载小库，提问一个只有资料里才有答案的问题；
+   - 重点展示回答下方的**来源（文件名 + 页码）**与**注入（全文/章节/片段）**。
+5. **（2 分钟）边界说明**：问一个资料里没有的问题，展示 AI 会说明"资料未提及"，体现可信。
+6. **（2 分钟）隐私**：打开数据目录，说明 Key 加密、文件在本地、可撤回同意。
+7. **（2 分钟）个性化**：换字体/背景，展示界面可定制。
+
+**话术边界**：不承诺 OCR、视频、云端同步、AI 自动改文件、手机版已可用。
+
+---
+
+## 10. 开发协作速查
+
+### 10.1 接手项目先读什么
+按 `docs/README.md` 的顺序读规范，再看 `DEVLOG.md` 最新条目了解进度，最后看 `PLAN.md` 的待办。
+动手前先复述理解，确认后再改代码。
+
+### 10.2 分支与记录
+- 分支按版本号命名（如 `v0.2.6`）；
+- 每个模块完成、自测通过后，在 `DEVLOG.md` **追加**记录（不改历史）；
+- 同步更新 `PLAN.md` 的勾选状态；
+- 交付由总代理按 `PLAN.md` 的验收标准核验。
+
+### 10.3 常见扩展点
+| 想做什么 | 改哪里 | 注意 |
+|---|---|---|
+| 新增厂商 | `resources/providers.json` | 以官方文档为准，声明模型能力与上下文窗口 |
+| 新增模型 | 同上 | 只改数据，不改代码 |
+| 新增文件格式 | 新增解析器并注册 | 必须携带页码/工作表等定位信息，否则引用不可用 |
+| 新增主题 | `resources/themes/*.json` | 令牌要全量提供，界面里不能硬编码颜色 |
+| 调整检索策略 | `core/retriever/*` | 参数改动必须真正影响行为，并有单测 |
+
+### 10.4 测试与验收底线
+- 全部单元测试通过；`MeowAi.exe --smoke-test` 退出码为 0。
+- 断网、错 Key、限流、损坏文件、空资料库等异常路径必须不崩溃、有明确提示。
+- 删除小库不删原文件——这条必须有测试长期守着。
+- 运行期 QML 不应有告警。
+
+---
+
+## 11. 术语表（给非开发同事）
+
+| 术语 | 通俗解释 |
+|---|---|
+| API Key | 厂商发给你的"通行证"，软件用它代表你调用 AI |
+| Token | 计费和长度单位，约等于"字/词"的碎片；中文一个汉字通常按 1–2 个 token 估 |
+| 上下文窗口 | 模型一次最多能"看到"多少 token，超出就会被截断或报错 |
+| Embedding / 向量 | 把文字变成一串数字坐标，意思越近坐标越近，用于"按意思找内容" |
+| RAG / 检索增强 | 先从资料里找相关内容，再让模型带着这些内容回答 |
+| Chunk / 片段 | 把长文档切成的小段，方便检索和注入 |
+| FTS / 关键词兜底 | 没有向量服务时，用传统关键词全文搜索 |
+| SSE / 流式 | 回答像打字一样逐字返回，而不是等全部生成完 |
+| 降级 | 某个能力不可用时，自动换一种可用方式并提示，而不是直接失败 |
+
+---
+
+## 12. 对外沟通的统一口径
+
+- 产品定位：**装在自己电脑上的、能读自己资料的 AI 助手**。
+- 数据边界：**文件与会话留在本机；提问和相关资料内容会发给你选择的厂商**。
+- 收费模式：**软件本身不内置额度，用户自行向厂商购买 API**。
+- 版本状态：**Windows 可安装使用；Android / Web 在开发中**。
+- 能力边界：以 §3.1 与 §8 为准，不承诺未完成功能。

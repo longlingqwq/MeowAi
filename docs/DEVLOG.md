@@ -39,6 +39,74 @@
 
 ## 四、日志（按时间倒序，最新在最上）
 
+### 2026-10-21 ｜ v0.2.6 交付补充：应用图标 + 设置内帮助 + 手册联系方式 + 重新打包 ｜ 状态：已交付
+- **阶段**：阶段三
+- **负责人**：总代理
+- **交付内容**：
+  - **图标**：用用户提供的猫咪照片裁出正方形头部区域（避开右下角水印），生成圆角图标；`resources/branding/app.png`（512 RGBA）与 `app.ico`（256/128/64/48/40/32/24/20/16 多尺寸）、`MeowAi.rc`
+  - **窗口图标**：`main.cpp` 增加 `QGuiApplication::setWindowIcon(":/branding/app.png")`。无边框窗口不会自动继承 exe 内嵌图标，必须显式设置
+  - **exe 图标**：`CMakeLists.txt` 在 WIN32 下把 `resources/branding/MeowAi.rc` 编入目标；资源管理器、任务栏、快捷方式均读取该图标
+  - **安装包图标**：`scripts/MeowAi.iss` 增加 `SetupIconFile=..\resources\branding\app.ico`；`AppPublisher` 改为 Longling，新增 `AppContact=3086865618@qq.com`
+  - **设置页帮助**：`ui/PersonalizationPage.qml` 底部新增「帮助」区块 + 「帮助」按钮；弹层展示开发者 **Longling**、联系方式 **3086865618@qq.com**、快速上手指引与《用户手册》位置。弹层宽高按窗口钳制并居中，不会溢出
+  - **用户手册**：`docs/USER_GUIDE.md` 头部与新增 §11「帮助与联系」写入同一开发者与联系方式
+  - **交付目录**：新建 `产品/`，内含 `MeowAi-Setup-0.2.6.exe`、`USER_GUIDE.md`、`DEVELOPER_GUIDE.md`
+- **自测**：Release 构建通过；`--smoke-test` 退出码 0；启动日志无 QML 告警；安装包静默安装成功（1398 个文件），安装后的 exe `--smoke-test` 退出码 0；安装包与 exe 图标均已内嵌猫咪图标
+- **遗留 / 待定**：与上一条相同（安装向导为英文、未签名、尚未在未装 Qt 的干净电脑实测）
+- **备注**：`/产品/` 与 `/dist/` 均已加入 `.gitignore`
+
+### 2026-10-21 ｜ v0.2.6 总代理验收 + UI 显示修复 + Windows 安装包 + 双手册 ｜ 状态：已验收（初步）
+- **阶段**：阶段三
+- **负责人**：总代理
+- **分支 / PR**：工作区仍基于 `v0.2.5` 分支（v0.2.6 改动未单独提交）；PR 仍未创建
+- **验收结论**：
+  - Debug / Release 全量构建通过；`ctest` **23/23 通过**（含 `tst_referencemode` 13 项）
+  - `windeployqt` 部署后的独立目录可正常启动，不依赖开发机 Qt PATH
+  - 参考资料模式关键点核对：文件级聚合召回、全文/章节/片段三级注入、预算钳制、`contextWindow` 探测与回退、仅参考语义提示词、注入可观测 chip 均与交付说明一致
+- **本次修复（UI 显示不全）**：
+  - `ui/MChip.qml`：新增 `maxWidth` + 文字 `elide`，长文件名不再撑破布局
+  - `ui/ConversationPage.qml`：联网来源 / 资料库概览 / 来源 / 注入 四行由 `Row` 改为 `Flow` 自动换行；输入框宽度加下限；接入卡厂商/模型/API 链接/模型名由固定宽改为按窗口自适应；"当前"胶囊与附图提示文字加省略
+  - `ui/ModelMenu.qml`、`ui/WebSearchPanel.qml`：弹层宽高按宿主窗口钳制，内容区改为可滚动，下方放不下时自动翻到上方（修复小窗口/高 DPI 下弹层底部被屏幕裁掉）
+  - `ui/ConversationPage.qml`：小库挂载列表限高 240 并改为可滚动列表
+  - `ui/LibraryPage.qml`：参数说明文字加 `width` + `wrapMode`，长参数名不再被截断
+  - `ui/main.qml`：窗口初始尺寸按可用屏幕自动收缩、位置回收到屏幕内；小屏（可用宽度 <1200 或高度 <820）自动最大化；切换显示器/远程桌面时重新收回窗口（修复小屏、高 DPI、远程桌面下窗口右侧与底部超出屏幕）
+  - 修复 3 类运行期 QML 告警：Flow 内违规锚点（来源/注入标签）、Connections 目标信号不存在、小库列表文字锚定到非兄弟项（长库名会压住计数/删除按钮）
+  - 修复后启动日志无 `qrc:` 运行期告警
+- **安装包**：新增 `scripts/MeowAi.iss`（Inno Setup 6，按用户安装、无需管理员）；`dist/MeowAi-Setup-0.2.6.exe`（约 32.7 MB，Qt 运行库 + PDFium 已内置）。静默安装验证：56 个文件落地、可执行文件存在
+- **文档**：重写 `USER_GUIDE.md`（面向零基础用户，含安装、首次配置、资料库、参考资料模式、隐私、FAQ）与 `DEVELOPER_GUIDE.md`（面向运维/销售/新开发，去代码化讲原理、部署、排查、演示话术）
+- **遗留 / 待定**：
+  - v0.2.6 改动尚未提交到独立分支，PR 仍未创建（DoD 第 3 条）
+  - 安装向导暂为英文（Inno Setup 未自带简体中文语言包）
+  - 安装包未做代码签名，Windows SmartScreen 会提示"未知发布者"
+  - 尚未在一台未安装 Qt 的干净电脑上实测安装包（建议发版前补做）
+- **备注**：安装包输出目录 `dist/` 已加入 `.gitignore`，不进入仓库
+
+### 2026-10-21 ｜ v0.2.6 资料库：参考资料模式（文件级召回 + 全文/章节注入）｜ 状态：待验收
+- **阶段**：阶段三（资料库能力增强）
+- **负责人**：开发 Agent
+- **分支 / PR**：`v0.2.6`（PR 待创建）
+- **交付内容**：
+  - **schema v3 增量迁移**（`storage/Database.cpp`）：新增 `documents`（token 估算 / 章节来源 / 章节数）与 `sections`（章节序号 / 标题 / chunk 区间 / token）两表，全部 `IF NOT EXISTS`，与 v1/v2 完全解耦；**不复制全文**（全文仍由 `chunks` 按 `ordinal` 拼接），旧文件无元数据时自动回退片段模式，**无需重建索引**
+  - **新增存储层 `storage/DocumentStore`**：documents / sections 纯 CRUD，upsert 走事务，级联删除
+  - **新增 `core/retriever/BudgetCalculator`**：上下文窗口钳制纯函数（`剩余 = contextWindow - 历史 - 回答预留`，逐级取 min），窗口未知时回退 16384 并给出中文降级说明
+  - **新增 `FullTextAssembler`**：按 ordinal 拼接 + 相邻片段重叠去重（`前块尾 == 后块头` 精确匹配），`assembleRange()` 供章节级复用
+  - **新增 `SectionPicker`**：以「章节内最高片段相似度」排序选章，超预算章节跳过并记录
+  - **新增 `InjectionPlanner`**：单文件三级决策 **全文 → 章节 → 片段**，每级降级都产出 `trace`；片段回退用 `QHash<ordinal, chunk>` 预建索引，避免逐条线性查找
+  - **新增 `FileLevelRetriever`**：文件级聚合打分 `max(片段分) + 命中数 × 权重`（默认 0.05）→ 阈值过滤 → 全局预算截断；**职责严格限定为编排，不做检索**（检索仍由 `RagRetriever` 的向量 + FTS5 异步路径负责）
+  - **`LibraryIndexer` / `DocumentMeta`**：索引完成后自动填充 `documents` / `sections`。章节识别按优先级：**标题**（docx `<w:pStyle>` 的 `Heading1`–`6` 或 `<w:outlineLvl>`；markdown `#`–`######`，代码围栏内的 `#` 不算）→ 工作表（xlsx）→ 幻灯片（pptx）→ 页近似（PDF / json）→ 无结构。标题识别通过 `ExtractedSegment::headingLevel` 下传，`ChunkSplitter::split()` 收集 `HeadingSpan` 后按「标题起点 → 下一标题前一片段」划分章节；标题信息**不落库、不进入注入正文**
+  - **上下文窗口自动探测**：拉取模型清单时解析厂商 `/models` 响应中的 `context_length` / `context_window` / `max_context_tokens` / `max_input_tokens`（OpenRouter / Together / Groq / DeepInfra 等会返回），命中即用；主流国内厂商（DeepSeek / 通义 / 智谱 / Kimi）只返回 id，回退 `providers.json` 内置值
+  - **新增配置 `fallbackContextWindow`**（默认 32768）：模型与内置清单都拿不到窗口时使用，用户可按 1M 上下文模型自行改大，无需改 JSON
+  - **`ChatController`**：system 提示词改为**仅供参考语义**（明确「不必仅依据文档」「可结合自身知识或联网结果」「文档未提及须说明」），无相关文件时**不注入任何 system 消息**；新增 `libraryInjections` 可观测属性（文件名 / 注入级别 / token / 截断 / 近似标记）
+  - **配置项**（`LibraryConfigStore` + `LibraryController` Q_PROPERTY + `LibraryPage.qml`）：`perFileBudget`（默认 20000）、`globalBudget`（100000）、`contextReserve`（2000）、`fileAggregateWeight`（0.05）、`fallbackContextWindow`（32768），输入即时持久化
+  - **`ConversationPage.qml`**：新增「注入」chip 行，按文件展示注入级别与截断/近似状态
+  - **`providers.json`**：为可核实型号补 `contextWindow`（gpt-4o 128K、qwen-plus 131K、glm-4.6 200K、glm-4.5-air 131K、kimi-k2.6 256K、claude-haiku-4.5 200K）；未公开型号不填，按 `fallbackContextWindow` 估算并在状态栏提示
+- **自测**：本地 Debug 全量构建通过；`ctest` **23/23 通过**。新增 `tests/tst_referencemode.cpp`（13 项）：窗口充足 / 窗口不足 / 窗口被历史占满 / 未知窗口回退（含 1M 自定义）、重叠去重、小文件全文注入、大文件片段回退、章节元数据启用章节注入、同文件多片段只产出一条结果、markdown 标题分章、markdown 解析器识别标题层级
+- **遗留 / 待定**：
+  - docx 的标题识别依赖 `w:pStyle` 样式名（`Heading1`–`6` / 纯数字 `1`–`6`）与 `w:outlineLvl`；若文档使用自定义样式名且未设大纲级别，则识别不到，退回页近似或无结构
+  - 预算口径统一为**入库时记录的 `tokenEst`**（全文/章节/片段一致），与 `ChunkSplitter::estimateTokens` 的实时估算可能存在轻微偏差
+  - 上下文窗口探测依赖厂商 `/models` 是否返回窗口字段；DeepSeek / 通义 / 智谱 / Kimi 官方接口目前不返回，只能用内置值或 `fallbackContextWindow`
+  - PR 仍未创建（DoD 第 3 条未满足）
+- **备注**：预算超限时**只截断不报错**，不会因上下文过长触发 400；无 embedding Key / 空库 / 无结构 PDF 均返回明确状态且不崩溃
+
 ### 2026-10-20 ｜ 总代理验收 + 双手册交付 ｜ 状态：已验收（初步）
 - **阶段**：阶段二（收尾）
 - **负责人**：总代理（审查与验收，不写代码）

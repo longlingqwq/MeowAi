@@ -45,6 +45,7 @@ meowai_add_test(tst_chunk)
 meowai_add_test(tst_embedding)
 meowai_add_test(tst_ragretriever)
 meowai_add_test(tst_cost)
+meowai_add_test(tst_referencemode)
 
 # 解析器用例会真跑 PDF 文本层：pdfium.dll 是运行期动态库，需与测试可执行文件同目录
 if(TARGET pdfium)

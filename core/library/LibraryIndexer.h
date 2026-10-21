@@ -1,6 +1,7 @@
 #pragma once
 
 #include "core/library/extract/ExtractorRegistry.h"
+#include "core/retriever/ChunkSplitter.h"
 #include "storage/LibraryConfigStore.h"
 
 #include <QList>
@@ -9,6 +10,7 @@
 #include <QString>
 #include <QStringList>
 
+class DocumentStore;
 class EmbeddingService;
 class ImageCaptionService;
 class LibraryStore;
@@ -42,6 +44,7 @@ public:
     void setConfig(const LibraryConfigData &config);
     /// caption 服务由上层持有；为空表示未配置图片描述能力
     void setCaptionService(ImageCaptionService *caption);
+    void setDocumentStore(DocumentStore *docStore);
 
     bool isAvailable() const;
     /// 有在途文件或排队文件
@@ -86,6 +89,7 @@ private:
     SqliteVectorIndex *m_index = nullptr;
     EmbeddingService *m_embedding = nullptr;
     ImageCaptionService *m_caption = nullptr;
+    DocumentStore *m_docStore = nullptr;
     ExtractorRegistry m_registry;
     LibraryConfigData m_config;
 
@@ -93,6 +97,8 @@ private:
     qint64 m_currentId = 0;
     Phase m_phase = Phase::Idle;
     QList<qint64> m_chunkIds;
+    /// 当前文件解析出的标题起点（docx 样式标题 / markdown `#`），用于章节切分
+    QList<HeadingSpan> m_currentHeadings;
     QStringList m_chunkTexts;
     bool m_roundActive = false;
     int m_indexed = 0;

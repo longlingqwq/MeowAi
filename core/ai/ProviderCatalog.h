@@ -38,6 +38,7 @@ struct CatalogModel
     QString displayName;
     bool supportsVision = false;
     bool isDefault = false;
+    int contextWindow = 0;       ///< 上下文窗口大小（token）；0 / 负数 = 未知
     CatalogThinkingSpec thinking;
 
     bool isValid() const { return !id.isEmpty(); }

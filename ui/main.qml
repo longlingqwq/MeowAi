@@ -14,13 +14,45 @@ import MeowAi
 Window {
     id: root
 
-    width: 1180
-    height: 760
-    minimumWidth: 900
-    minimumHeight: 620
+    // 初始尺寸按可用屏幕收缩；x/y 再夹一次，避免窗口落在屏幕外导致"底部看不到"
+    readonly property real screenW: Screen.desktopAvailableWidth
+    readonly property real screenH: Screen.desktopAvailableHeight
+
+    width: Math.min(1180, screenW - 80)
+    height: Math.min(760, screenH - 80)
+    x: Math.max(8, (screenW - width) / 2)
+    y: Math.max(8, (screenH - height) / 2)
+    minimumWidth: Math.min(820, Math.max(480, screenW - 40))
+    minimumHeight: Math.min(560, Math.max(420, screenH - 40))
     visible: true
     title: App.appName + " · " + App.platformId
     color: Theme.ink0
+
+    // 屏幕可用区域很小时直接最大化：由系统按真实工作区计算，避免底部超出屏幕
+    Component.onCompleted: {
+        if (screenW < 1200 || screenH < 820)
+            visibility = Window.Maximized
+    }
+
+    // 切换显示器/远程桌面时把窗口收回可视区域
+    Connections {
+        target: root
+        function onScreenChanged() { root.clampToScreen() }
+    }
+
+    /// 把窗口收回到当前屏幕内（远程桌面/投屏切换分辨率后也能自动恢复）
+    function clampToScreen() {
+        if (visibility === Window.Maximized || visibility === Window.FullScreen)
+            return
+        if (width > screenW - 16)
+            width = Math.max(480, screenW - 80)
+        if (height > screenH - 16)
+            height = Math.max(420, screenH - 80)
+        if (x + width > screenW - 8)
+            x = Math.max(8, screenW - width - 8)
+        if (y + height > screenH - 8)
+            y = Math.max(8, screenH - height - 8)
+    }
 
     /// 桌面端用无边框自绘标题栏；Android / Web 回退原生 chrome（见 PlatformAdapter）
     flags: App.customTitleBar ? (Qt.Window | Qt.FramelessWindowHint) : Qt.Window

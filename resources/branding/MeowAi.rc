@@ -1,0 +1,2 @@
+// Windows 可执行文件图标：资源管理器 / 任务栏 / 安装包快捷方式都读这里
+IDI_ICON1 ICON "app.ico"

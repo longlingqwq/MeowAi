@@ -1,13 +1,16 @@
 #include "core/library/LibraryIndexer.h"
 
 #include "core/library/ImageCaptionService.h"
+#include "core/library/DocumentMeta.h"
 #include "core/retriever/ChunkSplitter.h"
 #include "core/retriever/EmbeddingService.h"
 #include "core/retriever/VectorIndex.h"
+#include "storage/DocumentStore.h"
 #include "storage/LibraryStore.h"
 #include "storage/SqliteVectorIndex.h"
 
 #include <QDateTime>
+#include <QHash>
 #include <QMetaObject>
 
 namespace {
@@ -131,6 +134,11 @@ void LibraryIndexer::setCaptionService(ImageCaptionService *caption)
                     return;
                 finishFile(kStatusPending, captionTaskMessage(error));
             });
+}
+
+void LibraryIndexer::setDocumentStore(DocumentStore *docStore)
+{
+    m_docStore = docStore;
 }
 
 bool LibraryIndexer::isAvailable() const
@@ -257,7 +265,8 @@ void LibraryIndexer::saveSegments(const QList<ExtractedSegment> &segments)
     options.chunkSize = m_config.chunkSize;
     options.overlap = m_config.chunkOverlap;
     const ChunkSplitter splitter(options);
-    const QList<ChunkRecord> chunks = splitter.split(m_currentId, segments);
+    m_currentHeadings.clear();
+    const QList<ChunkRecord> chunks = splitter.split(m_currentId, segments, &m_currentHeadings);
     if (chunks.isEmpty()) {
         finishFile(kStatusNoText, QStringLiteral("未产生可用片段"));
         return;
@@ -328,6 +337,41 @@ void LibraryIndexer::finishFile(const QString &status, const QString &message)
         if (status == QString::fromLatin1(kStatusIndexed))
             record.indexedAt = QDateTime::currentMSecsSinceEpoch();
         m_store->updateFile(record, &error);
+    }
+
+    // ---------------------------------------------------------------- v0.2.6: 填充 documents/sections 元数据
+    // 仅当 chunks 已经入库（非 failed / unsupported / no_text_layer）时才做
+    const bool hasChunks = (status != QString::fromLatin1(kStatusFailed)
+                           && status != QString::fromLatin1(kStatusUnsupported)
+                           && status != QString::fromLatin1(kStatusNoText));
+    if (hasChunks && m_docStore && m_docStore->isAvailable() && !m_chunkIds.isEmpty()) {
+        QList<ChunkRecord> allChunks = m_store->chunksOfFile(fileId, &error);
+        if (!allChunks.isEmpty()) {
+            const DocumentMeta meta = detectDocumentMeta(allChunks, m_currentHeadings);
+
+            DocumentRecord docRec;
+            docRec.fileId = fileId;
+            docRec.tokenEstTotal = meta.tokenEstTotal;
+            docRec.sectionSource = meta.sectionSource;
+            docRec.sectionCount = meta.sections.size();
+            docRec.builtAt = QDateTime::currentMSecsSinceEpoch();
+
+            qint64 docId = 0;
+            if (m_docStore->upsertDocument(docRec, &docId, &error)) {
+                QList<SectionRecord> sectionRecs;
+                sectionRecs.reserve(meta.sections.size());
+                for (int i = 0; i < meta.sections.size(); ++i) {
+                    SectionRecord sr;
+                    sr.ordinal = i;
+                    sr.title = meta.sections[i].title;
+                    sr.chunkStart = meta.sections[i].chunkStart;
+                    sr.chunkEnd = meta.sections[i].chunkEnd;
+                    sr.tokenEst = meta.sections[i].tokenEst;
+                    sectionRecs.append(sr);
+                }
+                m_docStore->replaceSections(docId, sectionRecs, nullptr);
+            }
+        }
     }
 
     if (status == QString::fromLatin1(kStatusIndexed))

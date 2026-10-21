@@ -61,6 +61,7 @@
           "displayName": "GPT-4o",
           "supportsVision": true,
           "isDefault": false,
+          "contextWindow": 128000,
           "thinkingSpec": { "levels": [], "native": {} }
         }
       ]
@@ -148,6 +149,7 @@
           "displayName": "Qwen Plus（混合思考）",
           "supportsVision": false,
           "isDefault": false,
+          "contextWindow": 131072,
           "thinkingSpec": {
             "levels": ["off", "high"],
             "native": {
@@ -212,6 +214,7 @@
           "displayName": "Kimi K2.6",
           "supportsVision": true,
           "isDefault": false,
+          "contextWindow": 262144,
           "thinkingSpec": { "levels": [], "native": {} }
         }
       ]
@@ -255,6 +258,7 @@
           "displayName": "GLM-4.6",
           "supportsVision": false,
           "isDefault": false,
+          "contextWindow": 200000,
           "thinkingSpec": {
             "levels": ["off", "high"],
             "native": {
@@ -268,6 +272,7 @@
           "displayName": "GLM-4.5 Air",
           "supportsVision": false,
           "isDefault": false,
+          "contextWindow": 131072,
           "thinkingSpec": {
             "levels": ["off", "high"],
             "native": {
@@ -332,6 +337,7 @@
           "displayName": "Claude Haiku 4.5",
           "supportsVision": true,
           "isDefault": false,
+          "contextWindow": 200000,
           "thinkingSpec": {
             "levels": ["off", "high"],
             "native": {

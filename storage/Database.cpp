@@ -17,7 +17,7 @@ void setError(QString *error, const QString &message)
     }
 }
 
-constexpr int kCurrentSchemaVersion = 2;
+constexpr int kCurrentSchemaVersion = 3;
 
 /// 读取 meta 中的 schema_version；无记录或非法值视为 0（全新库）
 int readSchemaVersion(const QSqlDatabase &db)
@@ -260,6 +260,40 @@ bool createChunkFts(const QSqlDatabase &db, bool *ftsAvailable)
     return true;
 }
 
+/// v3：参考资料模式（文件级召回 + 章节注入）。
+/// 新增 documents（文档元数据，token 估算 + 章节来源类型）与 sections（章节结构）两表。
+/// 全部 IF NOT EXISTS，与 v1/v2 表完全解耦；旧文件在这两表无行时自动回退到片段模式。
+QStringList schemaV3Statements()
+{
+    return {
+        QStringLiteral(
+            "CREATE TABLE IF NOT EXISTS documents ("
+            "  id              INTEGER PRIMARY KEY AUTOINCREMENT,"
+            "  file_id         INTEGER NOT NULL UNIQUE,"
+            "  token_est_total INTEGER NOT NULL DEFAULT 0,"
+            "  section_source  TEXT    NOT NULL DEFAULT 'none',"
+            "  section_count   INTEGER NOT NULL DEFAULT 0,"
+            "  built_at        INTEGER NOT NULL DEFAULT 0,"
+            "  FOREIGN KEY (file_id) REFERENCES library_files(id) ON DELETE CASCADE"
+            ")"),
+        QStringLiteral(
+            "CREATE INDEX IF NOT EXISTS idx_documents_file ON documents(file_id)"),
+        QStringLiteral(
+            "CREATE TABLE IF NOT EXISTS sections ("
+            "  id          INTEGER PRIMARY KEY AUTOINCREMENT,"
+            "  document_id INTEGER NOT NULL,"
+            "  ordinal     INTEGER NOT NULL,"
+            "  title       TEXT    NOT NULL DEFAULT '',"
+            "  chunk_start INTEGER NOT NULL DEFAULT 0,"
+            "  chunk_end   INTEGER NOT NULL DEFAULT 0,"
+            "  token_est   INTEGER NOT NULL DEFAULT 0,"
+            "  FOREIGN KEY (document_id) REFERENCES documents(id) ON DELETE CASCADE"
+            ")"),
+        QStringLiteral(
+            "CREATE INDEX IF NOT EXISTS idx_sections_doc ON sections(document_id, ordinal)"),
+    };
+}
+
 } // namespace
 
 Database::Database()
@@ -367,6 +401,11 @@ bool Database::ensureSchema(QString *error)
     }
     if (version < 2) {
         if (!execStatements(db, schemaV2Statements(), error)) {
+            return false;
+        }
+    }
+    if (version < 3) {
+        if (!execStatements(db, schemaV3Statements(), error)) {
             return false;
         }
     }

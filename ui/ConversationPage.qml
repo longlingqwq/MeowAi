@@ -370,6 +370,7 @@ Item {
 
             // 厂商 + 模型
             Row {
+                width: parent.width
                 spacing: Theme.s3
 
                 MLabel {
@@ -379,7 +380,7 @@ Item {
 
                 MCombo {
                     id: providerBox
-                    width: 176
+                    width: Math.min(176, parent.width * 0.25)
                     model: page.providerNames
                     currentIndex: -1
                     placeholderText: qsTr("选择厂商")
@@ -393,7 +394,7 @@ Item {
 
                 MCombo {
                     id: modelBox
-                    width: 250
+                    width: Math.min(250, parent.width * 0.35)
                     model: page.modelNames
                     currentIndex: -1
                     enabled: page.modelNames.length > 0
@@ -405,6 +406,7 @@ Item {
 
             // 自定义厂商：手填 API 链接与模型名称
             Row {
+                width: parent.width
                 spacing: Theme.s3
                 visible: Chat.customizable
 
@@ -415,7 +417,7 @@ Item {
 
                 MField {
                     id: baseUrlField
-                    width: 320
+                    width: Math.min(320, parent.width * 0.45)
                     text: Chat.customBaseUrl
                     placeholderText: qsTr("https://your-gateway.example/v1")
                     onEditingFinished: Chat.setCustomBaseUrl(text)
@@ -428,7 +430,7 @@ Item {
 
                 MField {
                     id: customModelField
-                    width: 190
+                    width: Math.min(190, parent.width * 0.3)
                     text: Chat.modelId
                     placeholderText: qsTr("例如 gpt-5")
                     onEditingFinished: Chat.modelId = text
@@ -702,6 +704,9 @@ Item {
                     Text {
                         id: pillText
                         anchors.centerIn: parent
+                        width: Math.min(implicitWidth, 220)
+                        elide: Text.ElideRight
+                        horizontalAlignment: Text.AlignHCenter
                         text: page.providerLabel(Chat.providerId) + " · "
                               + (Chat.modelId.length > 0 ? Chat.modelId : qsTr("未选择模型"))
                         color: (pillHover.hovered || modelMenu.visible) ? Theme.accentHi : Theme.textDim
@@ -773,74 +778,131 @@ Item {
         }
 
         // 联网来源 chip：仅在本轮检索命中时出现（数据来自 Chat；本文件不碰网络）
-        Row {
+        Item {
             width: parent.width
-            spacing: Theme.s2
+            height: webSourceFlow.height
             visible: Chat.webSearchSources.length > 0
 
-            MChip {
-                dot: true
-                tone: "ok"
-                text: qsTr("已联网 · %1 条来源").arg(Chat.webSearchSources.length)
-            }
-
-            Repeater {
-                model: Chat.webSearchSources.slice(0, 3)
+            Flow {
+                id: webSourceFlow
+                width: parent.width
+                spacing: Theme.s2
 
                 MChip {
-                    required property var modelData
-                    tone: "neutral"
-                    text: modelData.title.length > 20
-                          ? modelData.title.substring(0, 20) + "…"
-                          : modelData.title
+                    dot: true
+                    tone: "ok"
+                    maxWidth: webSourceFlow.width
+                    text: qsTr("已联网 · %1 条来源").arg(Chat.webSearchSources.length)
+                }
+
+                Repeater {
+                    model: Chat.webSearchSources.slice(0, 3)
+
+                    MChip {
+                        required property var modelData
+                        tone: "neutral"
+                        maxWidth: webSourceFlow.width
+                        text: modelData.title.length > 20
+                              ? modelData.title.substring(0, 20) + "…"
+                              : modelData.title
+                    }
                 }
             }
         }
 
         // 资料库命中概览：挂载数 / 命中片段数 / 本轮注入 token（数据来自 Chat，本文件不检索）
-        Row {
+        Item {
             width: parent.width
-            spacing: Theme.s2
+            height: libraryStatusFlow.height
             visible: Chat.libraryMounted || Chat.libraryStatus.length > 0
 
-            MChip {
-                visible: Chat.libraryMounted
-                dot: true
-                tone: Chat.libraryDegraded ? "accent" : "ok"
-                text: qsTr("资料库 · %1 个小库").arg(Chat.mountedCollections.length)
-            }
+            Flow {
+                id: libraryStatusFlow
+                width: parent.width
+                spacing: Theme.s2
 
-            MChip {
-                visible: Chat.libraryHitCount > 0
-                tone: "ok"
-                text: qsTr("%1 个片段 · %2 token").arg(Chat.libraryHitCount).arg(Chat.libraryTokenCount)
-            }
+                MChip {
+                    visible: Chat.libraryMounted
+                    dot: true
+                    tone: Chat.libraryDegraded ? "accent" : "ok"
+                    maxWidth: libraryStatusFlow.width
+                    text: qsTr("资料库 · %1 个小库").arg(Chat.mountedCollections.length)
+                }
 
-            MChip {
-                visible: Chat.libraryStatus.length > 0
-                tone: Chat.libraryDegraded ? "accent" : "neutral"
-                text: Chat.libraryStatus
+                MChip {
+                    visible: Chat.libraryHitCount > 0
+                    tone: "ok"
+                    maxWidth: libraryStatusFlow.width
+                    text: qsTr("%1 个片段 · %2 token").arg(Chat.libraryHitCount).arg(Chat.libraryTokenCount)
+                }
+
+                MChip {
+                    visible: Chat.libraryStatus.length > 0
+                    tone: Chat.libraryDegraded ? "accent" : "neutral"
+                    maxWidth: libraryStatusFlow.width
+                    text: Chat.libraryStatus
+                }
             }
         }
 
         // 来源 chip：回答里引用的文件名 + 定位（可核对到页 / 表 / 行）
-        Row {
+        Item {
             width: parent.width
-            spacing: Theme.s2
+            height: sourceFlow.height
             visible: Chat.librarySources.length > 0
 
-            MLabel {
-                label: qsTr("来源")
-                anchors.verticalCenter: parent.verticalCenter
+            Flow {
+                id: sourceFlow
+                width: parent.width
+                spacing: Theme.s2
+
+                MLabel {
+                    label: qsTr("来源")
+                    height: 22
+                }
+
+                Repeater {
+                    model: Chat.librarySources.slice(0, 3)
+
+                    MChip {
+                        required property var modelData
+                        tone: "accent"
+                        maxWidth: sourceFlow.width - 40
+                        text: modelData.fileName + " · " + modelData.locLabel
+                    }
+                }
             }
+        }
 
-            Repeater {
-                model: Chat.librarySources.slice(0, 3)
+        // 注入级别：每个相关文件的注入方式（全文 / 章节 / 片段）与截断状态
+        Item {
+            width: parent.width
+            height: injectionFlow.height
+            visible: Chat.libraryInjections.length > 0
 
-                MChip {
-                    required property var modelData
-                    tone: "accent"
-                    text: modelData.fileName + " · " + modelData.locLabel
+            Flow {
+                id: injectionFlow
+                width: parent.width
+                spacing: Theme.s2
+
+                MLabel {
+                    label: qsTr("注入")
+                    height: 22
+                }
+
+                Repeater {
+                    model: Chat.libraryInjections.slice(0, 3)
+
+                    MChip {
+                        required property var modelData
+                        tone: modelData.truncated ? "accent" : "neutral"
+                        maxWidth: injectionFlow.width - 40
+                        text: modelData.fileName
+                              + " · " + modelData.level
+                              + " · " + modelData.tokenEst + " token"
+                              + (modelData.approximate ? qsTr("（近似章节）") : "")
+                              + (modelData.truncated ? qsTr("（已截断）") : "")
+                    }
                 }
             }
         }
@@ -991,13 +1053,18 @@ Item {
                                 wrapMode: Text.Wrap
                             }
 
-                            Repeater {
+                            ListView {
+                                width: 280
+                                // 高度封顶：小库再多也不会把弹层顶出屏幕
+                                height: Math.min(240, contentHeight)
+                                clip: true
+                                spacing: Theme.s1
                                 model: Library.mountOptions
 
-                                Item {
+                                delegate: Item {
                                     id: mountRow
                                     required property var modelData
-                                    width: 280
+                                    width: ListView.view ? ListView.view.width : 0
                                     height: 34
 
                                     Text {
@@ -1031,9 +1098,10 @@ Item {
 
                     MField {
                         id: composerField
-                        width: parent.width - webToggle.width - libraryToggle.width - sendButton.width
-                               - (cancelButton.visible ? cancelButton.width : 0)
-                               - parent.spacing * (cancelButton.visible ? 4 : 3)
+                        // 下限兜底：窗口再窄也不会把输入框压成负数而溢出行布局
+                        width: Math.max(120, parent.width - webToggle.width - libraryToggle.width - sendButton.width
+                                        - (cancelButton.visible ? cancelButton.width : 0)
+                                        - parent.spacing * (cancelButton.visible ? 4 : 3))
                         placeholderText: Chat.busy
                                          ? qsTr("正在生成…")
                                          : qsTr("输入消息，回车发送")
@@ -1083,6 +1151,8 @@ Item {
 
                     Text {
                         visible: Chat.supportsVision
+                        width: parent.width - 280 - Theme.s3 - 40
+                        elide: Text.ElideRight
                         text: Chat.imagesConfirmed
                               ? qsTr("已确认：该图片会被上传")
                               : qsTr("未确认：该图片不会被上传")
@@ -1093,6 +1163,8 @@ Item {
 
                     Text {
                         visible: !Chat.supportsVision
+                        width: parent.width - 280 - Theme.s3 - 40
+                        elide: Text.ElideRight
                         text: qsTr("该模型未声明视觉能力，附图入口已关闭")
                         color: Theme.textGhost
                         font.pixelSize: Theme.fSmall

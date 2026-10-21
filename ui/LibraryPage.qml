@@ -145,7 +145,7 @@ Item {
                             Text {
                                 anchors.left: parent.left
                                 anchors.leftMargin: Theme.s2
-                                anchors.right: countChip.left
+                                anchors.right: actionsRow.left
                                 anchors.rightMargin: Theme.s1
                                 anchors.verticalCenter: parent.verticalCenter
                                 text: collectionEntry.modelData.name
@@ -155,6 +155,7 @@ Item {
                             }
 
                             Row {
+                                id: actionsRow
                                 anchors.right: parent.right
                                 anchors.rightMargin: Theme.s1
                                 anchors.verticalCenter: parent.verticalCenter
@@ -617,7 +618,7 @@ Item {
 
                     MLabel { label: "检索参数" }
 
-                    Text { text: qsTr("Top-K（最终注入片段数）"); color: Theme.textFaint; font.pixelSize: Theme.fLabel }
+                    Text { text: qsTr("Top-K（最终注入片段数）"); color: Theme.textFaint; font.pixelSize: Theme.fLabel; width: parent.width; wrapMode: Text.Wrap }
                     MField {
                         width: parent.width
                         text: Library.topK
@@ -625,7 +626,7 @@ Item {
                         onEditingFinished: Library.topK = parseInt(text)
                     }
 
-                    Text { text: qsTr("每文件片段上限"); color: Theme.textFaint; font.pixelSize: Theme.fLabel }
+                    Text { text: qsTr("每文件片段上限"); color: Theme.textFaint; font.pixelSize: Theme.fLabel; width: parent.width; wrapMode: Text.Wrap }
                     MField {
                         width: parent.width
                         text: Library.perFileLimit
@@ -633,7 +634,7 @@ Item {
                         onEditingFinished: Library.perFileLimit = parseInt(text)
                     }
 
-                    Text { text: qsTr("注入 token 预算"); color: Theme.textFaint; font.pixelSize: Theme.fLabel }
+                    Text { text: qsTr("注入 token 预算"); color: Theme.textFaint; font.pixelSize: Theme.fLabel; width: parent.width; wrapMode: Text.Wrap }
                     MField {
                         width: parent.width
                         text: Library.tokenBudget
@@ -641,7 +642,7 @@ Item {
                         onEditingFinished: Library.tokenBudget = parseInt(text)
                     }
 
-                    Text { text: qsTr("相似度阈值（0–1）"); color: Theme.textFaint; font.pixelSize: Theme.fLabel }
+                    Text { text: qsTr("相似度阈值（0–1）"); color: Theme.textFaint; font.pixelSize: Theme.fLabel; width: parent.width; wrapMode: Text.Wrap }
                     MField {
                         width: parent.width
                         text: Library.similarityThreshold
@@ -649,7 +650,43 @@ Item {
                         onEditingFinished: Library.similarityThreshold = parseFloat(text)
                     }
 
-                    Text { text: qsTr("邻居扩展半径（前后各 N 段）"); color: Theme.textFaint; font.pixelSize: Theme.fLabel }
+                    Rectangle { width: parent.width; height: 1; color: Theme.hairline }
+
+                    MLabel { label: "参考资料模式（文件级注入）" }
+
+                    Text { text: qsTr("单文件预算（tokens）"); color: Theme.textFaint; font.pixelSize: Theme.fLabel; width: parent.width; wrapMode: Text.Wrap }
+                    MField {
+                        width: parent.width
+                        text: Library.perFileBudget
+                        validator: IntValidator { bottom: 1000; top: 200000 }
+                        onEditingFinished: Library.perFileBudget = parseInt(text)
+                    }
+
+                    Text { text: qsTr("全局预算（tokens，所有相关文件合计）"); color: Theme.textFaint; font.pixelSize: Theme.fLabel; width: parent.width; wrapMode: Text.Wrap }
+                    MField {
+                        width: parent.width
+                        text: Library.globalBudget
+                        validator: IntValidator { bottom: 1000; top: 500000 }
+                        onEditingFinished: Library.globalBudget = parseInt(text)
+                    }
+
+                    Text { text: qsTr("回答预留（tokens，超出上下文窗口时自动降级）"); color: Theme.textFaint; font.pixelSize: Theme.fLabel; width: parent.width; wrapMode: Text.Wrap }
+                    MField {
+                        width: parent.width
+                        text: Library.contextReserve
+                        validator: IntValidator { bottom: 200; top: 32000 }
+                        onEditingFinished: Library.contextReserve = parseInt(text)
+                    }
+
+                    Text { text: qsTr("未知窗口估算值（tokens；模型未提供上下文长度时使用）"); color: Theme.textFaint; font.pixelSize: Theme.fLabel; width: parent.width; wrapMode: Text.Wrap }
+                    MField {
+                        width: parent.width
+                        text: Library.fallbackContextWindow
+                        validator: IntValidator { bottom: 2000; top: 4000000 }
+                        onEditingFinished: Library.fallbackContextWindow = parseInt(text)
+                    }
+
+                    Text { text: qsTr("邻居扩展半径（前后各 N 段）"); color: Theme.textFaint; font.pixelSize: Theme.fLabel; width: parent.width; wrapMode: Text.Wrap }
                     MField {
                         width: parent.width
                         text: Library.neighborRadius
@@ -674,7 +711,7 @@ Item {
                         }
                     }
 
-                    Text { text: qsTr("切分尺寸（字符）"); color: Theme.textFaint; font.pixelSize: Theme.fLabel }
+                    Text { text: qsTr("切分尺寸（字符）"); color: Theme.textFaint; font.pixelSize: Theme.fLabel; width: parent.width; wrapMode: Text.Wrap }
                     MField {
                         width: parent.width
                         text: Library.chunkSize
@@ -682,7 +719,7 @@ Item {
                         onEditingFinished: Library.chunkSize = parseInt(text)
                     }
 
-                    Text { text: qsTr("片段重叠（字符）"); color: Theme.textFaint; font.pixelSize: Theme.fLabel }
+                    Text { text: qsTr("片段重叠（字符）"); color: Theme.textFaint; font.pixelSize: Theme.fLabel; width: parent.width; wrapMode: Text.Wrap }
                     MField {
                         width: parent.width
                         text: Library.chunkOverlap

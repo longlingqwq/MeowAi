@@ -6,6 +6,14 @@
 #include <QList>
 #include <QString>
 
+/// 章节起点：解析层识别出的标题落在哪个片段序号上
+struct HeadingSpan
+{
+    int ordinal = 0;   ///< 该标题首个片段在文件内的序号
+    int level = 1;     ///< 标题层级（1–6）
+    QString title;     ///< 标题文本（已去掉 Markdown `#` 前缀）
+};
+
 /**
  * 切分参数（来自 `LibraryConfigData::chunkSize` / `chunkOverlap`）。
  *
@@ -47,8 +55,10 @@ public:
 
     ChunkSplitOptions options() const;
 
-    /// 切分；`fileId` 仅写入记录，本类不访问数据库。空片段被跳过
-    QList<ChunkRecord> split(qint64 fileId, const QList<ExtractedSegment> &segments) const;
+    /// 切分；`fileId` 仅写入记录，本类不访问数据库。空片段被跳过。
+    /// `outHeadings` 非空时收集标题起点（docx 样式标题 / markdown `#`），供章节切分使用
+    QList<ChunkRecord> split(qint64 fileId, const QList<ExtractedSegment> &segments,
+                             QList<HeadingSpan> *outHeadings = nullptr) const;
 
 private:
     /// 纯文本 / 页面 / 幻灯片 / JSON 等：按字符窗口 + 段落边界切分
