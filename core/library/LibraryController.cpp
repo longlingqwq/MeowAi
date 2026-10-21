@@ -1153,9 +1153,22 @@ void LibraryController::applyEmbeddingConfig()
         return;
     if (m_embedding->busy())
         m_embedding->cancel();
+
+    // 批量上限以厂商目录为准：如通义 text-embedding-v4 单请求最多 10 条，
+    // 超出会被服务端直接 400。这里只在发起请求前裁剪，不改写用户保存的配置。
+    LibraryEmbeddingConfig embeddingConfig = m_config.embedding;
+    if (m_catalog) {
+        const int maxBatchSize =
+            m_catalog->provider(m_config.embedding.providerId).embedding.maxBatchSize;
+        if (maxBatchSize > 0) {
+            embeddingConfig.batchSize =
+                std::min(embeddingConfig.batchSize, maxBatchSize);
+        }
+    }
+
     m_embedding->configure(
         buildProviderConfig(m_config.embedding.providerId, QStringLiteral("library.embedding.")),
-        m_config.embedding);
+        embeddingConfig);
     if (m_retriever)
         m_retriever->setEmbeddingModel(m_config.embedding.providerId, m_config.embedding.modelId);
 }

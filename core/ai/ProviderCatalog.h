@@ -57,6 +57,7 @@ struct CatalogEmbeddingModel
 struct CatalogEmbedding
 {
     bool available = false;
+    int maxBatchSize = 0;  ///< 单请求文本条数上限；0 = 未声明（沿用用户配置）
     QList<CatalogEmbeddingModel> models;
 
     QString defaultModelId() const;

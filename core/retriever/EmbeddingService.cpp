@@ -21,6 +21,29 @@ QString sanitizeMessage(const QString &message)
     return text;
 }
 
+/// 从 HTTP 错误响应里提取可读原因（OpenAI 兼容格式 {"error":{"message":...}}）。
+/// 取不到结构化字段时退回原始文本，已经是「为什么失败」的唯一线索，不能丢。
+QString serverMessage(const QString &text)
+{
+    if (text.trimmed().isEmpty()) {
+        return QString();
+    }
+    const QJsonDocument document = QJsonDocument::fromJson(text.toUtf8());
+    if (document.isObject()) {
+        const QJsonObject detail =
+            document.object().value(QStringLiteral("error")).toObject();
+        const QString message = detail.value(QStringLiteral("message")).toString();
+        if (!message.isEmpty()) {
+            return sanitizeMessage(message);
+        }
+        const QString code = detail.value(QStringLiteral("code")).toString();
+        if (!code.isEmpty()) {
+            return sanitizeMessage(code);
+        }
+    }
+    return sanitizeMessage(text);
+}
+
 /// 未就绪原因；空串表示就绪。**不包含任何密钥**
 QString notReadyReason(const ProviderConfig &provider, const LibraryEmbeddingConfig &embedding)
 {
@@ -269,7 +292,13 @@ void EmbeddingService::handleFailed(int handle, int httpStatus,
             error.message = QStringLiteral("embedding 端点不存在（请核对服务地址与模型）");
         } else if (httpStatus > 0) {
             error.code = ChatError::HttpError;
-            error.message = QStringLiteral("embedding HTTP 错误 %1").arg(httpStatus);
+            // 带上服务端的原始原因（如「batch size 超过 10」），否则 400 无法自查
+            const QString detail = serverMessage(errorText);
+            error.message = detail.isEmpty()
+                                ? QStringLiteral("embedding HTTP 错误 %1").arg(httpStatus)
+                                : QStringLiteral("embedding HTTP 错误 %1：%2")
+                                      .arg(httpStatus)
+                                      .arg(detail);
         } else {
             error.code = ChatError::Unknown;
             error.message = errorText.isEmpty() ? QStringLiteral("embedding 请求失败")

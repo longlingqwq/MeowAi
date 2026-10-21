@@ -305,6 +305,9 @@ bool ProviderCatalog::load(QString *error)
         // 向量化能力（可选）：资料库用；条目非法只跳过该条并记警告
         const QJsonObject embedding = object.value(QStringLiteral("embedding")).toObject();
         provider.embedding.available = embedding.value(QStringLiteral("available")).toBool(false);
+        // 单请求批量上限：通义 text-embedding-v4 等服务限制为 10 条，超出会直接 400
+        provider.embedding.maxBatchSize =
+            embedding.value(QStringLiteral("maxBatchSize")).toInt(0);
         for (const QJsonValue &embeddingEntry :
              embedding.value(QStringLiteral("models")).toArray()) {
             const QJsonObject embeddingObject = embeddingEntry.toObject();

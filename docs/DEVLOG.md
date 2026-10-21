@@ -39,6 +39,19 @@
 
 ## 四、日志（按时间倒序，最新在最上）
 
+### 2026-10-21 ｜ v0.2.6 热修：通义 embedding 批量上限导致 HTTP 400 ｜ 状态：已修复
+- **阶段**：阶段三
+- **负责人**：总代理
+- **现象**：资料库导入 docx 后状态显示「向量化失败：embedding HTTP 错误 400」，与文件大小无关（12 段、171 段的文件均失败）
+- **根因**：通义 `text-embedding-v4` 单次请求最多 10 条文本（官方文档），而默认 `batchSize=16`；12/171 个片段会按 16 条一批发送，首批发 12 条即被服务端拒绝。已用实际 Key 实测：12 条返回 400，10 条返回 200
+- **修复**：
+  - `resources/providers.json`：embedding 增加 `maxBatchSize`（通义=10）
+  - `core/ai/ProviderCatalog`：解析 `maxBatchSize`
+  - `core/library/LibraryController::applyEmbeddingConfig`：发起请求前按厂商上限裁剪 batchSize（不改写用户配置）
+  - `core/retriever/EmbeddingService`：HTTP 错误信息附带服务端 `error.message`，后续可直接看到「批量超限」等原因
+- **验证**：Release / Debug 构建通过；`ctest` **23/23 通过**；实测 10 条请求返回 200
+- **影响**：已安装用户需覆盖安装本安装包，并在资料库对失败文件点「重建」
+
 ### 2026-10-21 ｜ v0.2.6 交付补充：应用图标 + 设置内帮助 + 手册联系方式 + 重新打包 ｜ 状态：已交付
 - **阶段**：阶段三
 - **负责人**：总代理

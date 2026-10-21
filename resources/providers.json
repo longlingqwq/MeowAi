@@ -120,6 +120,7 @@
       "validation": { "method": "chat-minimal" },
       "embedding": {
         "available": true,
+        "maxBatchSize": 10,
         "models": [
           {
             "id": "text-embedding-v4",
