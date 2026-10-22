@@ -451,10 +451,10 @@ v0.2.7
 | --- | --- |
 | 版本号 | v0.2.7 |
 | 日期 | 2026-10-22 |
-| commit | `5622ac4`（基线 `ca2d4a5`，两者均属于 v0.2.7） |
+| commit | `5622ac4`（基线 `ca2d4a5`；文档 `a61859d`；安装脚本 `82fcb60`，均属于 v0.2.7） |
 | 新增 | 界面重构：可折叠侧栏、会话列表、顶栏模型胶囊与模型菜单、资料库右侧配置抽屉、标题栏品牌区；`AvatarCrop.qml` 512×512 裁剪；`SplashIntro.qml` 内置开屏（约 3.5 秒、按主题、可跳过、音效开关）；消息复制与重新生成；分享文字与分享图片（PNG 保存）；Markdown 渲染；助手消息 Token 与耗时；schema v4 的 `messages` 用量列；资料库配置抽屉的拉取模型、服务地址、保存与验证；`branding` 品牌资源与应用图标；Svg Qt 模块；新增 `tst_chatfeatures`、`tst_libraryservices`、`tst_libraryurls`，测试目标共 26 个 |
 | 修改 | `main.qml` 重构为侧栏 + 内容区 + 顶栏；`ConversationPage.qml` 改为顶部模型条与内联配置面板；`LibraryPage.qml` 拆分出 `LibraryConfigPanel.qml`；`PersonalizationPage.qml` 增加内置开屏预览与“打开用户手册”；`AppController` 增加手册定位与开屏状态；`ChatController` 增加 `renderMarkdown`、`regenerateLast` 与用量记录；版本号统一为 0.2.7 |
 | 修复 | 无 DEVLOG 记录，提交信息为 `feat` 与 `chore`，未列出修复项，无法逐条核对 |
-| 未完成或已知限制 | DEVLOG 没有 v0.2.7 条目；`scripts/MeowAi.iss` 的 0.2.7 版本号修改仍在工作区未提交，HEAD 脚本仍是 0.2.6；仓库没有 `dist/`，安装包只存在于被忽略的 `产品/`；没有干净虚拟机验收记录；CI 仍不构建测试；PDFium、分类、备份、升级、Skill、视频、OCR、Android/Web 的限制不变 |
-| 证据来源 | `git show 5622ac4`；`git show ca2d4a5`；`git log --oneline 9bbe54f..5622ac4`；DEVLOG 无 v0.2.7 记录 |
+| 未完成或已知限制 | DEVLOG 没有 v0.2.7 条目；仓库没有 `dist/`，安装包只存在于被忽略的 `产品/`；没有干净虚拟机验收记录；CI 仍不构建测试；PDFium、分类、备份、升级、Skill、视频、OCR、Android/Web 的限制不变 |
+| 证据来源 | `git show 5622ac4`；`git show ca2d4a5`；`git show a61859d`；`git show 82fcb60`；`git log --oneline 9bbe54f..82fcb60`；DEVLOG 无 v0.2.7 记录 |
 | 状态 | 已交付（Windows 初步验收；发布记录不完整） |
