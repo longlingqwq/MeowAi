@@ -1,7 +1,6 @@
 # MeowAi 开发 / 运维 / 销售参考手册
 
-> 版本：v0.2.6
-> 对应提交：`9bbe54f`（Windows 交付版；基线 `ce1bdae`，热修复后为 `9bbe54f`）
+> 版本：v0.2.7
 > 读者：接手开发的人、负责交付和排障的人、对外演示和销售的人
 > 口径：本手册以仓库代码、`CMakeLists.txt`、`resources/providers.json`、`.git` 和 `docs/DEVLOG.md` 为准。状态分为已交付、待验收、骨架、未实现。骨架表示有代码或接口但未接入主流程；未实现表示没有可用功能。
 
@@ -53,7 +52,7 @@ MeowAi 是 Windows 桌面 AI 对话客户端。它不内置大模型，不在本
 | 成本预估 | 资料库页右栏 | 已交付 | `core/library/CostEstimator.*`、`resources/pricing.json` |
 | 主题与个性化 | 个性化页 | 已交付 | `core/theme/*`、`storage/ThemeStore.*`、`storage/PersonalizationStore.*` |
 | 图片描述 | 资料库右栏 | 已交付 | `core/library/ImageCaptionService.*`、`core/library/extract/ImageTranscoder.*`、`ImageCaptionExtractor.*` |
-| Windows 安装包 | `产品/MeowAi-Setup-0.2.6.exe`（发布记录） | 已交付 | `scripts/MeowAi.iss`、`scripts/*` 打包流程；仓库无产物 |
+| Windows 安装包 | `产品/MeowAi-Setup-0.2.7.exe`（发布记录） | 已交付 | `scripts/MeowAi.iss`、`scripts/*` 打包流程；仓库无产物 |
 | 应用内升级 | 无 | 骨架 | `core/update/UpdateManager.*`，`checkForUpdates()` 直接发 `checkFailed` |
 | 文件分类 | 无 | 骨架 | `core/library/CategoryManager.*`，`categoriesFor()` 返回空列表，`generateCategories()` 返回 false |
 | 修改前备份 | 无 | 骨架 | `core/library/BackupManager.*`，`backupBeforeModify()` 返回空串 |
@@ -114,7 +113,7 @@ ctest --test-dir build -C Debug --output-on-failure
 
 PDFium。PDF 解析依赖 `third_party/pdfium`。运行 `pwsh scripts/fetch-pdfium.ps1` 下载；未放置 PDFium 时项目仍可构建，但 PDF 会走“无文本层”分支。仓库当前没有 `third_party/pdfium`，因此直接从源码构建得到的程序不能解析 PDF。DEVLOG 记录发布安装包内置 PDFium，但仓库没有保留安装包，产物内容无法核对。
 
-打包。先构建 Release，再准备 `dist/MeowAi/`（`MeowAi.exe` 和 Qt 运行库），然后用 Inno Setup 编译 `scripts/MeowAi.iss`，输出 `dist/MeowAi-Setup-0.2.6.exe`。安装程序按当前用户安装，默认目录 `C:\Users\<用户名>\AppData\Local\Programs\MeowAi`，不需要管理员权限。安装包不包含手册；发布时把安装包和两份手册放进同一个发放目录。DEVLOG 使用的目录名是 `产品/`，但当前仓库既没有 `产品/`，也没有 `dist/`，需要重新构建产物。
+打包。先构建 Release，再准备 `dist/MeowAi/`（`MeowAi.exe` 和 Qt 运行库），然后用 Inno Setup 编译 `scripts/MeowAi.iss`，输出 `dist/MeowAi-Setup-0.2.7.exe`。安装程序按当前用户安装，默认目录 `C:\Users\<用户名>\AppData\Local\Programs\MeowAi`，不需要管理员权限。安装包不包含手册；发布时把安装包和两份手册放进同一个发放目录。DEVLOG 使用的目录名是 `产品/`，但当前仓库既没有 `产品/`，也没有 `dist/`，需要重新构建产物。
 
 冒烟检查。`MeowAi.exe --smoke-test` 在主界面加载后立即退出。退出码 0 只说明 QML 根对象加载成功，不覆盖配置、网络、数据库和资料库功能。程序是 WIN32 GUI 子系统，终端看不到标准输出，但可以读退出码：
 

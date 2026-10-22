@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.21)
 
 project(MeowAi
-    VERSION 0.2.6
+    VERSION 0.2.7
     DESCRIPTION "MeowAi - 本地优先的 AI 助理客户端"
     LANGUAGES CXX
 )
