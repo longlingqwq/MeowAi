@@ -2,118 +2,121 @@
 
 > 版本：v0.2.7
 > 读者：接手开发的人、负责交付和排障的人、对外演示和销售的人
-> 口径：本手册以仓库代码、`CMakeLists.txt`、`resources/providers.json`、`.git` 和 `docs/DEVLOG.md` 为准。状态分为已交付、待验收、骨架、未实现。骨架表示有代码或接口但未接入主流程；未实现表示没有可用功能。
+> 口径：本手册以 v0.2.7 提交 `5622ac4` 的代码、`CMakeLists.txt`、`resources/providers.json`、`.git` 和 `docs/DEVLOG.md` 为准。状态分为已交付、待验收、骨架、未实现。骨架表示有代码或接口但未接入主流程；未实现表示没有可用功能。
 
 ---
 
 ## 1. 一句话理解产品
 
-MeowAi 是 Windows 桌面 AI 对话客户端。它不内置大模型，不在本机推理，依靠用户填写的厂商 API Key 获取回答。
+MeowAi 是 Windows 桌面 AI 对话客户端。它不内置大模型，不在本机推理，依靠用户填写的厂商 API Key 获取回答。程序自己负责界面、会话、资料库检索和隐私控制。
 
-产品的三个支点是：多厂商对话、资料库检索、本地优先的数据与密钥保护。它不做账号体系，不做云端同步，不做本机模型部署。
-
-对外介绍时，先说“装在电脑上的 AI 客户端，可以接自己的 API Key，可以建资料库让 AI 读自己的文件”。不要把它说成“本地大模型”或“开箱即用的 ChatGPT 替代品”。第一次使用必须先配置厂商和 Key。
+产品边界：只交付 Windows 桌面版。Android 与 Web 只有平台适配骨架，没有可运行安装包。iOS 未开始。
 
 ---
 
 ## 2. 产品由哪几块组成
 
-代码分五层，依赖方向固定为 `ui → core → providers/storage → platform`。QML 只调用 `AppController`、`ChatController`、`LibraryController` 等门面对象，不直接访问网络、数据库或密钥库。`core` 不反向依赖 `ui`。`storage` 不依赖 `core`。`platform` 只提供路径、密钥加密、窗口和平台能力。
+界面层在 `ui/`，全部是 QML。界面不直连数据库、不发网络请求、不读密钥，只调用注入的控制器对象。
 
-| 层 | 主要文件 | 职责 |
-| --- | --- | --- |
-| 界面层 | `ui/main.qml`、`ui/ConversationPage.qml`、`ui/LibraryPage.qml`、`ui/PersonalizationPage.qml`、`ui/ModelMenu.qml`、`ui/WebSearchPanel.qml`、`ui/LibraryConsent.qml`、`ui/components/*.qml` | 渲染、交互、错误展示；不承载业务规则 |
-| 门面层 | `core/AppController.*` | 创建平台、路径、数据库、各控制器；向 QML 暴露上下文属性；处理启动、窗口、冒烟自检 |
-| 业务层 | `core/chat/*`、`core/library/*`、`core/retriever/*`、`core/skill/*`、`core/update/*` | 对话编排、资料库索引与检索、参考资料模式、技能扫描、升级检查 |
-| 适配层 | `providers/*`、`core/ai/*`、`storage/*` | OpenAI/Anthropic 协议、SSE、厂商目录、SQLite、配置存储、密钥保险库 |
-| 平台层 | `platform/impl/*` | Windows/Android/Web 的路径、DPAPI/Keystore、无边框窗口、资源根目录 |
+应用层在 `core/`。`AppController` 负责装配和生命周期；`ChatController` 负责一轮对话；`LibraryController` 负责资料库；`ThemeManager` 负责主题与个性化资源。
 
-`AppController` 在构造时完成这些动作：选择平台后端；计算数据目录、资源目录、资料库目录、技能目录；打开 `metadata.db` 并迁移 schema；创建 `ChatHistoryModel`、`ChatController`、`LibraryController`、`ThemeManager`；扫描技能；恢复 AI 配置和资料库配置；把对象注册为 QML 上下文属性。
+厂商层在 `providers/`。`ProviderCatalog` 读取 `resources/providers.json`，`OpenAiProvider` 处理 OpenAI 兼容协议，`AnthropicProvider` 处理 Anthropic 协议，`ChatStreamParser` 解析 SSE。
 
-`ChatController` 负责会话切换、消息追加、历史裁剪、厂商请求、流式增量、中断、错误映射、联网工具循环和资料库上下文组装。`LibraryController` 负责小库、文件、文件夹快照、索引队列、embedding、图片描述、检索参数、成本预估、库内搜索和同意状态。
+存储层在 `storage/`。`Database` 管理 SQLite，`ChatStore` 管会话与消息，`LibraryStore` 管文件与集合，`DocumentStore` 管文档与章节，`SqliteVectorIndex` 管向量，`SecureStore` 管密钥，各 `*ConfigStore` 管配置。
+
+平台层在 `platform/`。`PlatformAdapter` 定义应用数据目录、密钥加密、标题栏、自更新等能力。桌面实现用 DPAPI；Web 实现拒绝保存密钥。
+
+构建与交付在根 `CMakeLists.txt`、`scripts/`、`.github/` 和 `产品/`。
 
 ---
 
 ## 3. 功能地图与交付状态
 
-| 功能 | 入口 | 状态 | 代码依据 |
+| 功能 | 入口 | 状态 | 关键实现 |
 | --- | --- | --- | --- |
-| 多厂商对话 | 对话页接入卡 | 已交付 | `core/ai/ProviderCatalog.*`、`providers/OpenAiProvider.*`、`providers/AnthropicProvider.*`、`core/chat/ChatController.*` |
-| 模型清单与拉取 | 接入卡“模型”“拉取清单” | 已交付 | `ProviderCatalog::models`、`ChatController::fetchModelList` |
-| Key 保存与校验 | 接入卡“密钥”“保存”“验证”“清除” | 已交付 | `core/chat/ChatController.*`、`storage/SecureStore.*`、`platform/impl/DesktopPlatformAdapter.*` |
-| 思考档位与高级参数 | 底部“当前”胶囊 → 模型菜单 | 已交付 | `ui/ModelMenu.qml`、`ChatController::setThinkingLevel`、`setAdvancedParams` |
-| 流式回答与中断 | 输入条“发送”“中断” | 已交付 | `OpenAiProvider` SSE、`ChatController::cancel` |
-| 多会话历史 | 左侧会话列表 | 已交付 | `storage/ChatStore.*`、`storage/Database.*`、`core/chat/ChatHistoryModel.*` |
-| 附图对话 | 输入条“附图” + 接入卡“安全”开关 | 已交付 | `ChatController::sendWithImage`、`imagesConfirmed`、`OpenAiProvider` 视觉消息 |
-| 智能联网 | 输入条“智能联网”开关 | 已交付 | `core/web/WebSearchService.*`、`core/web/WebSearchTool.*`、`ChatController` 内工具循环、`ui/WebSearchPanel.qml` |
-| 资料库导入与索引 | 资料库页 | 已交付 | `core/library/LibraryController.*`、`LibraryIndexer.*`、`core/library/extract/*` |
-| 向量检索与关键词兜底 | 资料库参数 / 对话挂载 | 已交付 | `core/retriever/RagRetriever.*`、`storage/SqliteVectorIndex.*`、`Database` 的 `chunk_fts` |
-| 参考资料模式 | 自动生效 | 已交付 | `core/retriever/FileLevelRetriever.*`、`FullTextAssembler.*`、`SectionPicker.*`、`BudgetCalculator.*`、`InjectionPlanner.*` |
-| 成本预估 | 资料库页右栏 | 已交付 | `core/library/CostEstimator.*`、`resources/pricing.json` |
-| 主题与个性化 | 个性化页 | 已交付 | `core/theme/*`、`storage/ThemeStore.*`、`storage/PersonalizationStore.*` |
-| 图片描述 | 资料库右栏 | 已交付 | `core/library/ImageCaptionService.*`、`core/library/extract/ImageTranscoder.*`、`ImageCaptionExtractor.*` |
-| Windows 安装包 | `产品/MeowAi-Setup-0.2.7.exe`（发布记录） | 已交付 | `scripts/MeowAi.iss`、`scripts/*` 打包流程；仓库无产物 |
-| 应用内升级 | 无 | 骨架 | `core/update/UpdateManager.*`，`checkForUpdates()` 直接发 `checkFailed` |
-| 文件分类 | 无 | 骨架 | `core/library/CategoryManager.*`，`categoriesFor()` 返回空列表，`generateCategories()` 返回 false |
-| 修改前备份 | 无 | 骨架 | `core/library/BackupManager.*`，`backupBeforeModify()` 返回空串 |
-| Skill 接入对话 | 无 | 未实现 | `core/skill/SkillRegistry.*` 只扫描 `resources/skills/<id>/manifest.json`，没有调用入口 |
-| 视频解析 | 资料库 | 未实现 | 视频只登记为 `video`，状态标“不支持” |
-| 扫描版 PDF OCR | 资料库 | 未实现 | 无文本层时标 `no_text_layer`，不做识别 |
-| Android 客户端 | 无 | 骨架 | `platform/impl/AndroidPlatformAdapter.*`，无构建产物 |
-| Web 客户端 | 无 | 骨架 | `platform/impl/WebPlatformAdapter.*`，密钥保存直接拒绝 |
-| iOS 客户端 | 无 | 未实现 | 仓库没有 iOS 交付物 |
+| 多厂商对话 | 对话页顶栏模型胶囊 | 已交付 | `ChatController`、`core/ai/ProviderCatalog.*`、`providers/*` |
+| 流式与中断 | 输入条发送/中断 | 已交付 | `ChatController`、`ChatStreamParser` |
+| 会话历史 | 侧栏会话列表 | 已交付 | `ChatHistoryModel`、`storage/ChatStore.*` |
+| 会话删除 | 会话条右侧 `×` | 已交付 | `History.removeConversation`，点击即删 |
+| 回答复制与重新生成 | 助手消息下方按钮 | 已交付 | `ChatController::regenerateLast`、QML 剪贴板 |
+| 文字与图片分享 | 助手消息下方按钮 | 已交付 | `ConversationPage.shareImage`，`grabToImage` 保存 PNG |
+| Markdown 渲染 | 助手消息 | 已交付 | `ChatController::renderMarkdown` |
+| Token 与耗时 | 助手消息底部 | 已交付 | `ChatUsage`、数据库 schema v4 |
+| 附图对话 | 输入条“附图” | 已交付 | `ChatController::sendWithImage`、`imagesConfirmed` |
+| 智能联网 | 输入条“联网搜索”开关 | 已交付 | `core/web/WebSearchService.*`、`WebSearchTool.*`、工具循环 |
+| 资料库导入与索引 | 资料库页 | 已交付 | `LibraryController`、`LibraryIndexer`、`core/library/extract/*` |
+| 向量检索与关键词兜底 | 资料库配置抽屉 / 对话挂载 | 已交付 | `RagRetriever`、`SqliteVectorIndex`、`chunk_fts` |
+| 参考资料模式 | 自动生效 | 已交付 | `FileLevelRetriever`、`FullTextAssembler`、`SectionPicker`、`BudgetCalculator`、`InjectionPlanner` |
+| 资料库外发同意 | 首次启用/挂载 | 已交付 | `LibraryConsent.qml`、`LibraryController::grantConsent` |
+| 资料库服务配置 | 资料库右侧抽屉 | 已交付 | `LibraryConfigPanel.qml`、`fetchEmbeddingModels`、`fetchCaptionModels`、`validate*` |
+| 成本预估 | 资料库配置抽屉 | 已交付 | `CostEstimator`、`resources/pricing.json` |
+| 主题 | 个性化页 | 已交付 | `ThemeManager`、`resources/themes/theme1.json`、`theme2.json` |
+| 字体/背景/头像 | 个性化页 | 已交付 | `ThemeManager`、`AvatarCrop.qml`（512×512） |
+| 内置开屏 | 启动时 | 已交付 | `SplashIntro.qml`（约 3.5 秒，按主题，可跳过） |
+| 自定义开屏视频 | 个性化页 | 已交付 | `SplashVideo.qml`，上限 200 MB |
+| 应用图标与品牌 | 安装包/标题栏 | 已交付 | `resources/branding/*`、`MeowAi.rc` |
+| 文件分类 | 无界面入口 | 骨架 | `CategoryManager` 返回空结果 |
+| 修改前备份 | 无界面入口 | 骨架 | `BackupManager` 返回空 |
+| 应用内升级 | 无界面入口 | 骨架 | `UpdateManager::checkForUpdates` 发 `checkFailed` |
+| Skill 调用 | 无入口 | 未实现 | `SkillRegistry` 只扫描清单，不接入对话 |
+| 视频解析 | 无 | 未实现 | `VideoExtractor` 只登记，不产出文本 |
+| OCR | 无 | 未实现 | 扫描版 PDF 无文本层 |
+| Android / Web 客户端 | 无 | 骨架 | `WebPlatformAdapter` 等，无安装包 |
+| iOS 客户端 | 无 | 未实现 | 规划走 Web |
 
 ---
 
 ## 4. 核心功能原理
 
-AI 接入。多数厂商走 OpenAI 兼容协议，Anthropic 走独立协议。`OpenAiProvider` 和 `AnthropicProvider` 分别负责拼请求、带鉴权头、解析 SSE、增量回调、取消和错误映射。自定义厂商允许配置 `baseUrl` 和模型名，走 OpenAI 兼容协议。厂商目录在 `resources/providers.json`，运行时从 `:/providers/providers.json` 读取。目录里定义 `id`、`displayName`、`baseUrl`、`models`、`authStyle`、`embedding`、`caption`、`nativeSearch` 等字段。新增 OpenAI 兼容厂商原则上只改这个 JSON，不改请求代码。
+启动链路。`main.cpp` 创建 `QGuiApplication`，设置组织名和应用名，选择 `PlatformAdapter`。`AppPaths` 按平台数据目录生成布局，`Database` 打开 `metadata.db` 并迁移 schema。随后装配 `SecureStore`、`AiConfigStore`、`ChatStore`、`LibraryConfigStore`、`PersonalizationStore` 等，创建 `AppController`，把控制器注入 QML 上下文，加载 `qrc:/ui/main.qml`。
 
-模型清单。优先使用内置清单。点“拉取清单”时请求 `/models`，成功则替换当前清单，失败则保留内置清单。上下文窗口优先取模型条目里的 `contextWindow`，缺失时用 `providers.json` 的内置值，再缺失时用资料库配置里的 `fallbackContextWindow`，默认 32768。
+一轮对话。用户发送后，`ChatController` 先写入用户消息，再组装上下文：最近 20 条历史消息、挂载小库的检索结果、联网工具结果。然后按厂商协议发流式请求。`ChatStreamParser` 解析增量文本，界面实时追加。收到 `[DONE]` 或结束标记后写入完整助手消息。失败时保留已生成内容并标记 `partial` 或 `error`。
 
-密钥。Key 的存储键包括 `provider.<id>.api_key`、`library.embedding.<provider>.api_key`、`library.caption.<provider>.api_key`、`web.search.api_key`。Windows 下 `SecureStore` 通过 `DesktopPlatformAdapter::protectSecret` 调用 DPAPI，密文落盘到数据目录 `secure/`。`config.json` 不保存 Key。Linux/macOS/Web 返回“不支持加密存储”，Web 明确拒绝保存。验证 Key 时用一次最小请求：401/403 判“无效”，429、超时、断网、5xx 判“无法验证”，成功判“有效”。
+工具循环。开启联网后，模型可以返回工具调用。`ChatController` 执行 `WebSearchTool`，把搜索结果作为工具消息回填，最多 3 轮。超过轮次上限后停止工具调用，要求模型直接回答。工具调用过程显示“联网中…”。
 
-会话历史。`ChatStore` 使用 `metadata.db` 的 `conversations`、`messages`、`message_attachments` 表。发送时只取最近 20 条消息（`kMaxHistoryMessages`），避免上下文无限增长。消息状态有 `streaming`、`complete`、`partial`、`error`。中断时把当前助手消息标为 `partial`，保留已生成内容。
+图片对话。`ChatController::sendWithImage` 先检查 `imagesConfirmed`。关闭时直接拒绝并返回错误。开启后读取图片路径，交给 `ImageTranscoder` 转码，再以视觉消息格式发给厂商。图片只在这一轮使用，不写入资料库。
 
-资料库。`LibraryController` 管理小库、文件、归库关系、文件夹快照和索引队列。导入上传时把文件复制到 `library/`，记录 `origin_path` 但绝不删除原文件。关联文件夹只保存源路径和快照，不复制文件。解析器按扩展名分派：文本走纯文本解析，Office 走 docx/xlsx/pptx 解析，PDF 走 PDFium，图片走转码和视觉描述，视频只登记。文本切分后写入 `chunks`，再按 embedding 配置写入 `chunk_vectors`。关键词检索优先用 `chunk_fts` 的 trigram FTS5；虚拟表建不出来时降级为 LIKE，不影响其他能力。
+资料库入库。`LibraryIndexer` 按扩展名选择 `Extractor`。文本类解析出纯文本，`ChunkSplitter` 按 700 字符、120 重叠切分。图片走 `ImageTranscoder` 和 `ImageCaptionExtractor`，需要视觉模型生成描述。片段写入 `chunks`，向量写入 `chunk_vectors`，关键词写入 `chunk_fts`。PDF 需要 PDFium；缺失时 `PdfTextExtractor` 降级，文件标为“无文本层”。
 
-参考资料模式。v0.2.6 的主链路是文件级召回，不再只按片段注入。`FileLevelRetriever` 先召回相关文件，`BudgetCalculator` 算可用预算，`SectionPicker` 选章节，`FullTextAssembler` 判断能否全文注入，`InjectionPlanner` 决定全文、章节还是片段，并生成截断标记。数据库 v3 新增 `documents` 和 `sections` 两张表。docx 按标题样式或大纲级别分章，Markdown 按标题分章，xlsx 按工作表、pptx 按幻灯片、PDF 按页近似分章。旧文件没有章节记录时自动回退片段模式。
+检索。问题先做 embedding，再在 `SqliteVectorIndex` 里算相似度，取 Top-K。向量结果不足时用 FTS5 trigram 兜底。结果按相似度和文件聚合权重排序，做邻居扩展，再按 token 预算裁剪。命中片段带文件 ID、偏移和引用信息。
 
-联网搜索。A 形态是“检索后把结果拼进上下文”；B 形态是“把搜索作为工具交给模型，由模型决定是否调用”。v0.2.4 起使用 B 形态，由 `ChatController` 内的工具循环配合 `WebSearchTool` 最多执行 3 轮工具调用。DeepSeek 使用厂商原生搜索，零配置，复用 DeepSeek Key。其他厂商使用自定义搜索端点，端点返回 JSON，程序解析结果并抓取前 2 条正文。搜索失败、超时、401、403、429 都降级为普通对话。
+参考资料模式。先由 `FileLevelRetriever` 按文件聚合。`BudgetCalculator` 计算单文件预算、全局预算和回答预留。`FullTextAssembler` 尝试注入全文；放不下时交给 `SectionPicker` 选章节；再放不下时回到片段。`InjectionPlanner` 生成最终注入计划和引用。未知上下文窗口回退 32768 token。
 
-图片。图片进入资料库后先本地转码，统一到最长边 1536 像素，再调用视觉模型生成 500 token 以内的描述，描述与文本走同一套切分和向量链路。对话附图是另一条链路：只有模型声明视觉能力、用户打开“允许把图片上传给厂商”时才发送。开关关闭时请求直接被拒绝，这是有意的隐私保护。
+用量。厂商返回 `usage` 时，`ChatUsage` 记录 prompt、completion、total token。`ChatController` 同时记录本轮耗时。两者写入 `messages` 的 `prompt_tokens`、`completion_tokens`、`total_tokens`、`elapsed_ms` 列，界面在助手消息底部展示。厂商不返回用量时显示 `—`。
 
-隐私与同意。资料库首次启用或首次挂载时弹出同意说明。未同意时文件可以本地入库，但不建向量、不发图片。撤回同意后立即停止挂载、启用、索引和图片描述。删除小库、解除文件夹关联、移除文件都不删除导入前的原始文件。
+密钥。`SecureStore` 把明文交给 `PlatformAdapter::protectSecret`。Windows 使用 DPAPI，附加熵 `MeowAi.Security.v1`，密文写入 `secure/<provider>.vault`。`config.json` 只存“是否已配置”等非敏感状态。Linux 和 macOS 的桌面实现返回未实现；Web 实现 `supportsSecretEncryption()` 为 false，保存直接拒绝。
+
+主题与个性化。`ThemeManager` 读取 `resources/themes/theme1.json` 与 `theme2.json`，把颜色、圆角、字号映射成 QML 可读属性。字体、背景、头像、开屏视频复制到 `assets/`。头像经 `AvatarCrop.qml` 裁剪成 512×512。开屏优先自定义视频；没有视频时用 `SplashIntro.qml` 按当前主题播放内置动画。`PersonalizationStore` 持久化开关和文件路径。
 
 ---
 
 ## 5. 部署与分发
 
-构建环境。Windows 10/11 64 位；Visual Studio 2022（MSVC x64）；CMake 3.21 及以上；Qt 6.5 及以上，交付验证使用 6.8.3 `msvc2022_64`；Inno Setup 6；PowerShell 7 可选，用于下载 PDFium。
+构建环境：Windows 10/11 x64，Visual Studio 2022，Qt 6.8.3 `msvc2022_64`，CMake 3.21 以上。最低 Qt 版本 6.5，C++17。
 
-配置与构建。在仓库根目录执行：
-
-```powershell
-cmake -S . -B build -G "Visual Studio 17 2022" -A x64 `
-  -DCMAKE_PREFIX_PATH="C:/Qt/6.8.3/msvc2022_64"
-cmake --build build --config Release
-```
-
-测试构建与执行。测试目标 `meowai_tests` 是 `EXCLUDE_FROM_ALL`，普通构建不会生成测试可执行文件。本地要先单独构建测试目标，再跑 ctest：
+配置与构建：
 
 ```powershell
 cmake -S . -B build -G "Visual Studio 17 2022" -A x64 `
   -DCMAKE_PREFIX_PATH="C:/Qt/6.8.3/msvc2022_64" `
   -DMEOWAI_BUILD_TESTS=ON
+cmake --build build --config Release
+```
+
+构建测试。测试目标默认 `EXCLUDE_FROM_ALL`，日常构建不会编译。需要显式构建聚合目标：
+
+```powershell
 cmake --build build --config Debug --target meowai_tests
 ctest --test-dir build -C Debug --output-on-failure
 ```
 
-当前 `tests/CMakeLists.txt` 注册 23 个测试目标，覆盖联调测试、数据库、密钥、厂商解析、工具循环、资料库、检索、参考资料模式和冒烟。测试文件里的注释仍写“21 个”，属于注释过期，以 23 为准。
+当前 `tests/CMakeLists.txt` 注册 26 个测试目标，覆盖存储、密钥、主题、厂商解析、SSE、工具循环、资料库、检索、参考资料模式、会话用量、资料库服务与冒烟。测试文件顶部注释仍写“21 个”，属于注释过期，以 26 为准。
 
-PDFium。PDF 解析依赖 `third_party/pdfium`。运行 `pwsh scripts/fetch-pdfium.ps1` 下载；未放置 PDFium 时项目仍可构建，但 PDF 会走“无文本层”分支。仓库当前没有 `third_party/pdfium`，因此直接从源码构建得到的程序不能解析 PDF。DEVLOG 记录发布安装包内置 PDFium，但仓库没有保留安装包，产物内容无法核对。
+PDFium。PDF 解析依赖 `third_party/pdfium`。运行 `pwsh scripts/fetch-pdfium.ps1` 下载；未放置 PDFium 时项目仍可构建，但 PDF 会走“无文本层”分支。仓库当前没有 `third_party/pdfium`，因此直接从源码构建得到的程序不能解析 PDF。DEVLOG 记录发布安装包内置 PDFium，但仓库没有保留安装包解包内容，产物内部是否包含无法从源码核对。
 
-打包。先构建 Release，再准备 `dist/MeowAi/`（`MeowAi.exe` 和 Qt 运行库），然后用 Inno Setup 编译 `scripts/MeowAi.iss`，输出 `dist/MeowAi-Setup-0.2.7.exe`。安装程序按当前用户安装，默认目录 `C:\Users\<用户名>\AppData\Local\Programs\MeowAi`，不需要管理员权限。安装包不包含手册；发布时把安装包和两份手册放进同一个发放目录。DEVLOG 使用的目录名是 `产品/`，但当前仓库既没有 `产品/`，也没有 `dist/`，需要重新构建产物。
+打包。先构建 Release，再准备 `dist/MeowAi/`（`MeowAi.exe` 和 Qt 运行库），然后用 Inno Setup 编译 `scripts/MeowAi.iss`，输出 `dist/MeowAi-Setup-0.2.7.exe`。安装程序按当前用户安装，默认目录 `C:\Users\<用户名>\AppData\Local\Programs\MeowAi`，不需要管理员权限。安装包不包含手册；发布时把安装包和两份手册放进同一个发放目录。
+
+当前交付状态。`产品/` 目录里有 `MeowAi-Setup-0.2.7.exe`，大小约 34.5 MB。`产品/` 被 `.gitignore` 忽略，不在版本库内。仓库没有 `dist/`。`scripts/MeowAi.iss` 的 0.2.7 版本号修改仍在工作区，未提交到 `5622ac4`；提交里的脚本仍是 0.2.6。重新打包前先确认脚本版本。
 
 冒烟检查。`MeowAi.exe --smoke-test` 在主界面加载后立即退出。退出码 0 只说明 QML 根对象加载成功，不覆盖配置、网络、数据库和资料库功能。程序是 WIN32 GUI 子系统，终端看不到标准输出，但可以读退出码：
 
@@ -122,134 +125,118 @@ PDFium。PDF 解析依赖 `third_party/pdfium`。运行 `pwsh scripts/fetch-pdfi
 $LASTEXITCODE
 ```
 
-发布检查清单。确认版本号在 `CMakeLists.txt` 为 0.2.6；确认安装包文件名正确；确认 `resources/providers.json`、`resources/pricing.json`、`resources/themes/*.json` 已打包；确认 PDFium DLL 已复制；在干净 Windows 虚拟机安装并启动；用真实 Key 发一条消息；导入一个 PDF 和一个图片并索引；挂载资料库提一个问题；卸载后确认数据目录仍在。
-
-升级与回滚。当前没有应用内升级。发布新版本时覆盖安装，数据目录保留。回滚时安装旧版安装包。schema 只做增量迁移，v3 不会删除 v1/v2 表；但旧版程序不识别 v3 表，回滚后新功能数据不可见，会话和资料库旧数据仍可用。
-
-CI 现状。`.github/workflows/ci.yml` 只构建默认目标，然后执行 `ctest`。由于 `meowai_tests` 设置了 `EXCLUDE_FROM_ALL`，测试可执行文件不会被构建，ctest 找不到可执行文件。当前 CI 的测试步骤不可信。修复方式是在 ctest 前增加 `cmake --build build --config Release --target meowai_tests`。本轮只改文档，没有改 CI。
+CI。`.github/workflows/ci.yml` 只构建默认目标，再执行 ctest。测试目标不在默认构建里，ctest 找不到可执行文件。当前 CI 不能提供有效测试证据，测试需要本地按上面的命令跑。
 
 ---
 
 ## 6. 运维排查手册
 
-| 现象 | 先查什么 | 处理 |
-| --- | --- | --- |
-| 启动后窗口在屏幕外 | 最近是否换过显示器或改过缩放 | 任务管理器结束进程后重启；程序会按当前屏幕收回窗口 |
-| 双击无反应 | 是否已有 MeowAi 进程 | 结束旧进程再启动；检查安全软件拦截 |
-| SmartScreen 提示未知发布者 | 安装包是否签名 | 当前未签名，属于已知限制；确认来源后点“更多信息 → 仍要运行” |
-| 程序能开，发消息报 401/403 | Key 是否正确、厂商是否匹配 | 重新保存 Key；自定义厂商检查 `baseUrl` 是否到 `/v1` |
-| 报 429 | 厂商限流或余额 | 降低频率，检查厂商控制台额度 |
-| 报超时/断网 | 代理、防火墙、公司网络 | 关闭或配置代理；换网络重试 |
-| Key 状态“无法验证” | 是否限流、超时、5xx | 不代表 Key 错误，稍后重试 |
-| Key 保存失败 | 数据目录是否可写、`secure/` 是否被拦截 | 修复权限或信任目录后重试 |
-| 模型清单拉取失败 | 网络、Key、`/models` 权限 | 保留内置清单不影响使用；检查 Key 权限 |
-| 自定义厂商发不出去 | `baseUrl`、模型名是否为空 | 两项都填；链接以 `/v1` 结尾 |
-| 附图被拒绝 | 模型是否支持视觉、上传确认是否打开 | 换视觉模型，打开接入卡“安全”开关 |
-| 智能联网不生效 | 当前厂商是否有搜索源 | DeepSeek 零配置；其他厂商配置自定义端点 |
-| 联网提示“未就绪” | 端点、密钥 | 端点返回 JSON；DeepSeek 检查 Key |
-| 资料库文件“待建向量” | embedding 配置 | 配置厂商/模型/Key 后重建索引 |
-| 图片一直“待索引” | 视觉模型、同意状态 | 配置图片描述；确认已同意；必要时转 png/jpg |
-| PDF“无文本层” | 是否扫描件、是否有 PDFium | 官方包内置 PDFium；扫描件当前不支持 OCR |
-| 导入大文件界面卡住 | 文件大小 | 当前解析在 UI 线程同步执行，等待完成，不要重复点击 |
-| 删除小库后找不到原文件 | 是否误解“删除小库” | 删除小库不删原文件；检查原始路径和 `origin_path` |
-| 数据迁移后 Key 失效 | 是否换电脑或换 Windows 账户 | DPAPI 密文不可跨账户解密，重新填 Key |
-| 开屏视频无声 | 音效开关、系统音量、视频音轨 | 打开“播放音效”；确认视频自带音轨 |
-| 主题错色 | 主题令牌是否完整 | 内置两套主题不会出现；自定义主题补齐令牌 |
+启动即退出。先用 `--smoke-test` 看退出码。非 0 时检查 Qt 运行库是否齐全、`qrc:/ui/main.qml` 是否打进资源、显卡驱动是否支持 Quick。发布包缺 `platforms/qwindows.dll` 时会在启动阶段报错。
 
-当前程序没有落盘日志文件，也没有 `qInstallMessageHandler`。排障依赖界面错误横幅、`--smoke-test` 退出码、Windows 事件查看器和手工复现。这是已知短板，后续应增加滚动日志。
+界面空白或布局错乱。检查 `resources/branding`、`resources/themes`、`resources/splash` 是否打进 qrc。v0.2.7 使用 Svg 模块加载品牌图，部署时需要 `Qt6Svg.dll` 和 `imageformats/qsvg.dll`。缺失时 logo 不显示，其他界面仍可用。
+
+Key 保存失败。Windows 下看 `secure/` 是否可写、DPAPI 是否可用。Linux/macOS 当前不支持加密，保存会失败。Web 端直接拒绝。错误码会写进界面提示，不写日志。
+
+Key 验证失败。401/403 是 Key 无效。429 是限流。超时和连接失败是网络问题。厂商返回 404 多为服务地址少了 `/v1` 或模型名不存在。验证只发一次最小请求，不消耗对话上下文。
+
+对话无回答。按顺序检查：厂商、模型、Key 是否齐全；档位参数是否被高级 JSON 覆盖成非法值；网络是否可达；SSE 是否被代理缓冲。代理缓冲表现为长时间无增量，最后一次性返回。需要求网关关闭缓冲。
+
+图片发送被拒。看 `imagesConfirmed` 是否为 true，模型是否声明视觉能力。自定义厂商默认不支持视觉，除非网关兼容视觉消息格式。
+
+资料库一直待建向量。看同意状态、embedding 厂商、模型名、Key、服务地址。看索引队列是否在运行。点“重建”后观察状态变化。HTTP 400 多为模型名或批量格式问题；v0.2.6 已按厂商 `maxBatchSize` 分片。HTTP 429 需要降低并发或换时段。
+
+PDF 无文本层。确认构建时是否启用 PDFium。源码构建默认没有 `third_party/pdfium`。扫描版 PDF 即使有 PDFium 也提不出文字，需要 OCR，本版本未实现。
+
+图片没有描述。确认 caption 厂商、模型、Key、服务地址，确认模型支持图片。未配置时图片只入库，不参与检索。
+
+检索没有结果。确认小库已挂载、文件状态是“已索引”、相似度阈值不过高、FTS 兜底未被关闭。嵌入模型换了以后必须重建索引，旧向量维度不兼容。
+
+会话丢失。检查 `%APPDATA%\MeowAi\MeowAi\metadata.db` 是否存在、是否可写。数据库迁移失败会进入内存模式，重启后会话丢失。备份时同时复制 `metadata.db` 和 `library/`、`assets/`。
+
+升级失败。当前没有应用内升级。`UpdateManager` 只返回失败信号。手动下载新安装包覆盖安装，数据目录保留。
+
+开屏异常。内置开屏不播放时看“启动时播放”开关。自定义视频不播放时看编码和体积上限 200 MB。视频损坏会回退到内置开屏。开屏期间点“跳过”应直接进入主界面。
+
+头像不显示。看 `assets/` 下是否有裁剪结果，看图片是否损坏。裁剪输出固定 512×512，源图过小会提示加载失败。
 
 ---
 
 ## 7. 进度与路线
 
-| 阶段 | 内容 | 状态 |
-| --- | --- | --- |
-| 阶段一 | 框架、构建、平台适配、存储、骨架模块、首批测试、CI | 已交付（v0.1.0） |
-| 阶段二 | 真实 AI 接入、密钥加密、个性化、UI 重做、会话历史、主题、无边框标题栏 | 已交付（v0.2.0 / v0.2.1） |
-| 阶段三 | 多厂商目录、模型菜单、档位、密钥校验、联网 A/B 形态 | 已交付（v0.2.3 / v0.2.4，初步验收） |
-| 阶段四 | 资料库、RAG、成本预估、同意机制、参考资料模式 | 已交付（v0.2.5 / v0.2.6，初步验收） |
-| 阶段五 | 文件分类、AI 修改前备份、Skill 接入、应用内升级、Android/Web | 骨架或未实现 |
-| 未排期 | OCR、视频解析、云端同步、代码签名、自动更新源 | 未实现 |
+已交付到 v0.2.7。Windows 主链路完整：配置、对话、联网、资料库、参考模式、个性化、开屏、安装包。
 
-`docs/PLAN.md` 里仍有“图标与 UI 定稿 [ ]”“防崩溃自检 [ ]”等未勾选项，但 v0.2.6 已经交付图标、安装包和 `--smoke-test`。PLAN 的勾选状态落后于代码，以本手册和 DEVLOG 为准。
+当前优先级最高的收尾项：
+
+1. 给 v0.2.7 补 DEVLOG 记录，写清提交、变更、验收结果。
+2. 提交 `scripts/MeowAi.iss` 的 0.2.7 版本号修改。
+3. 修 CI：先构建 `meowai_tests`，再执行 ctest。
+4. 在干净 Windows 虚拟机上做一次安装、升级、卸载验收。
+5. 确认发布包是否内置 PDFium，并把结论写进发布说明。
+6. 补资料库同意文案与实现的定期回归，避免文案再次出现“另行同意图片外发”。
+
+未排期的模块：文件分类、修改前备份、应用内升级、Skill 调用、视频解析、OCR、Android/Web 客户端。这些模块目前只有骨架或未实现，不能对外承诺日期。
 
 ---
 
 ## 8. 已知限制
 
-资料库解析和索引在 UI 线程同步执行。大 PDF、大 Excel 会造成数秒卡顿。后续应把解析和索引移到工作线程，并用信号回传进度。
-
-文件夹关联是快照模式，不是实时监视。源目录变化后必须点“重建快照”。没有文件系统监听器。
-
-资料库是只读参考，不提供 AI 回写文件。`CategoryManager` 和 `BackupManager` 是骨架：前者不生成分类，后者不复制备份。任何“AI 修改文件前会自动备份”的说法都不成立。
-
-`UpdateManager` 是骨架。`checkForUpdates()` 直接发出“更新检查尚未实现（阶段三接入）”，没有更新源、下载、校验和安装入口。
-
-Skill 只扫描不调用。`SkillRegistry` 会读取 `resources/skills/<id>/manifest.json` 和技能文档，但 `ChatController` 没有注入或调用技能的路径。界面没有技能入口。
-
-Web 端拒绝保存密钥。`WebPlatformAdapter::supportsSecretEncryption()` 返回 false，保存 Key 时返回“网页端不保存密钥，请每次会话重新填写”。这是设计选择，不是缺陷。
-
-Android 与 Web 只有平台适配代码，没有构建产物、没有安装包、没有经过真机验收。Android Keystore 代码存在但未验证。
-
-没有代码签名。Windows SmartScreen 会提示未知发布者。安装向导是英文界面，中文用户需要按 Next/Install 操作。
-
-没有应用内升级，也没有自动更新源。升级方式是覆盖安装新版本安装包。
-
-没有日志文件。没有 OCR、视频解析、重排序模型、云端同步、多用户、代理设置界面。
-
-上下文窗口依赖厂商返回值。厂商不返回窗口时使用内置值或 `fallbackContextWindow`，估算偏小会截断资料，偏大会被厂商拒绝。
-
-图片描述依赖视觉模型和 Qt 图片插件。`webp` 在部分 Qt 构建里缺少插件，会转码失败；资料库会保留文件并标记失败，不会崩溃。
-
-CI 的 ctest 步骤当前不会构建测试目标，测试结果不可信。测试注释写 21 个，实际注册 23 个。
-
-`docs/PLAN.md`、部分 DEVLOG 细节和界面帮助文案存在落后或冲突，见第 14 节与交付说明。文档不改历史记录。
+- v0.2.7 没有 DEVLOG 条目，变更证据只有 git 提交。
+- `scripts/MeowAi.iss` 的 0.2.7 版本号未提交，当前 HEAD 脚本仍是 0.2.6。
+- CI 不构建测试目标，测试证据只能来自本地。
+- 仓库没有 `third_party/pdfium`，源码构建不能解析 PDF 文本层。
+- 仓库没有 `dist/`，安装包只在被忽略的 `产品/` 目录里。
+- 安装向导只有英文。
+- 应用内升级是骨架，检查更新必定失败。
+- 文件分类和修改前备份是骨架，界面没有入口。
+- Skill 只扫描清单，不接入对话。
+- 视频只登记，不解析；扫描版 PDF 不做 OCR。
+- Android 与 Web 只有平台适配骨架；iOS 未开始。
+- Linux 和 macOS 没有真实密钥加密，也没有安装包。
+- 数据目录不提供自动备份。用户需要手动复制。
+- 会话删除、文件移除、恢复默认外观都没有二次确认。
+- 测试注释写“21 个”，实际 26 个。
 
 ---
 
 ## 9. 演示脚本
 
-15 分钟演示按这个顺序走。每一步都先给入口，再给结果，不跳步。
+演示前准备：一个可用的 API Key；一个包含 PDF、Word、Excel、图片的资料文件夹；一台 1920×1080 的 Windows 电脑；断网备用热点。
 
-第 1 分钟，打开程序。指出左侧三个导航：对话、个性化、资料库。指出顶栏右上角头像和底部状态栏。说明数据在本机，不需要注册账号。
+1. 双击安装包，按英文向导完成安装。
+2. 启动后等内置开屏播放，点“跳过”进入主界面。
+3. 点顶栏“配置”，选 DeepSeek，填 Key，点“保存”，点“验证”，显示“已验证”。
+4. 点模型胶囊，演示悬停打开、单击打开、长按打开三种方式。
+5. 选一个支持视觉的模型，发送一条纯文字问题，展示流式输出、Token 与耗时。
+6. 点“复制”，再点“重新生成”，展示消息操作。
+7. 打开“联网搜索”，提问一个需要实时信息的问题，展示“联网中…”和来源胶囊。
+8. 打开配置面板“安全”开关，附图提问，展示图片消息。
+9. 切到资料库，新建小库，导入 PDF、Word、Excel 和图片。
+10. 首次弹出同意层，讲清外发范围和撤回方式，点“同意并启用”。
+11. 配置 embedding 与 caption，点“拉取模型”“验证可用性”，重建索引。
+12. 回到对话，挂载小库，提问文件里的细节，展示引用和参考资料模式。
+13. 切到个性化，切换两套主题，预览内置开屏，演示头像裁剪。
+14. 打开帮助，点“打开用户手册”，展示随包文档。
+15. 最后说明边界：分类、备份、升级、Skill、视频、OCR 尚未交付。
 
-第 2 到 4 分钟，配置 Key。点接入卡“配置”，选 DeepSeek 或 OpenAI，选模型，粘贴 Key，点“保存”，点“验证”。指出状态从“未配置”变成“已就绪”或“有效”。强调 Key 加密保存在本机，不写进配置文件。
-
-第 4 到 6 分钟，发一条普通消息。展示流式输出。生成中点“中断”，说明已生成内容保留。新建一个会话，再切回旧会话，展示历史持久化。
-
-第 6 到 8 分钟，展示模型菜单。鼠标停留在底部“当前”胶囊约 1 秒，打开菜单。切换模型和档位。展开“高级原生参数”，说明不熟悉不要填。打开“联网搜索”配置，指出 DeepSeek 是“内置源 · 零配置”。
-
-第 8 到 11 分钟，建资料库。切到资料库页，点“同意并启用”，读一遍同意说明。新建小库，导入一个 PDF 和一个文本文件，展示状态从“待索引”到“已索引”或“待建向量”。指出删除小库不删原文件。
-
-第 11 到 13 分钟，挂载资料库。回到对话页，打开“资料库”开关，挂载刚建的小库。提一个只有文件里才有答案的问题。展示回答上方的“资料库 · 1 个小库”“来源”“注入”标签。说明没有命中时不会硬塞资料。
-
-第 13 到 14 分钟，展示联网。打开“智能联网”，提一个需要最新信息的问题。展示“已联网 · N 条来源”。说明搜索是工具，模型可以决定不搜。
-
-第 14 到 15 分钟，收尾。切到个性化页，换主题，换背景或头像。指出“帮助”里的开发者和联系方式。说明当前未实现应用内升级、OCR、视频解析、Skill 调用，不要现场承诺。
-
-演示禁忌。不要展示没有配置 Key 的“发送”；不要把骨架功能说成已完成；不要说“文件会被 AI 自动修改”；不要说“资料库内容绝对不会离开本机”，正确说法是“未同意不会离开，同意后只发给选定的厂商”。
+演示时不要说“自动更新”“本地大模型”“OCR 识别扫描件”“Skill 已接入”“Android 可用”。这些都不成立。
 
 ---
 
 ## 10. 开发协作速查
 
-分支。功能分支从当前交付基线拉出。版本分支用 `v0.2.x` 命名。仓库当前的版本标识是分支引用，不是 annotated tag；`git tag -l` 为空。发布时如果要 tag，需要单独创建并推送。
+改动前先读 `agent.md`、`docs/AGENT.md`、`docs/PROJECT_CHARTER.md`、`docs/PLAN.md`、`docs/WORKFLOW.md`。
 
-提交。提交信息用中文，格式建议“类型: 内容”，例如“feat: 资料库支持文件夹快照”“fix: 修正嵌入批次上限”。一次提交只做一件事。不要在提交里混入文档以外的生成物。
+分层规则：QML 只调用注入的控制器；`core/` 不直接读 QML；`providers/` 只处理协议；`storage/` 只处理持久化；`platform/` 只处理平台差异。新增依赖先看是否已有抽象，不要跨层直连。
 
-DEVLOG。新记录追加到 `docs/DEVLOG.md` 顶部，日期时间用本地时间。记录必须写清：变更范围、涉及文件、验证命令与结果、未完成项、已知风险。历史条目只读，不改写。发现历史记录错误，在 PR 或交付说明里报告。
+新增功能的最小闭环：控制器公开属性或 `Q_INVOKABLE`；QML 接线；状态与错误可显示；持久化可恢复；测试覆盖关键分支；手册写清入口和失败表现。
 
-PLAN。阶段任务完成后更新 `docs/PLAN.md` 的勾选和状态。PLAN 是路线视图，不是验收证据；验收以代码、测试和 DEVLOG 为准。
+提交规范：一个提交只做一类事。提交信息用 `feat`、`fix`、`chore`、`docs`、`test` 前缀，写清模块和版本。不要把构建产物、安装包、密钥、截图临时文件提交进仓库。
 
-文档。用户手册和开发手册的版本号、路径、命令、功能名称必须一致。改功能时同步改文档。文档不承诺未实现功能。状态用“已交付 / 待验收 / 骨架 / 未实现”，不用模糊的“基本完成”。
+测试规范：新逻辑至少覆盖成功、失败、边界三种路径。测试目标加进 `tests/CMakeLists.txt`。本地跑 `meowai_tests` 和 ctest，不依赖 CI。
 
-测试。新增功能至少补一个测试目标，并在 `tests/CMakeLists.txt` 注册。提交前本地执行测试目标的构建和 ctest。CI 目前不会自动构建测试目标，不能只看 CI 绿灯。
+文档规范：状态必须写已交付、待验收、骨架、未实现之一。路径、类名、命令必须能在仓库里核对。无法核对的产物写“无可考记录”，不要编造。
 
-密钥红线。任何代码、日志、错误信息、URL、配置样例都不得包含真实 Key。调试输出要脱敏。新增平台时必须实现 `supportsSecretEncryption`，不能退化成明文保存。
-
-资料库红线。不得删除用户原始文件。不得在未同意时外发文件内容或图片。不得把资料库内容写进日志。修改文件的能力当前不存在；将来接入时必须先经过 `BackupManager`。
-
-跨层约束。QML 不直接发 HTTP、不直接开数据库、不直接读写密钥文件。业务逻辑放 `core`。平台差异放 `platform`。厂商差异优先放 `resources/providers.json`。
+密钥规范：测试和演示不要提交真实 Key。日志、截图、错误信息里出现 Key 时按泄露处理，立即吊销。
 
 ---
 
@@ -257,194 +244,217 @@ PLAN。阶段任务完成后更新 `docs/PLAN.md` 的勾选和状态。PLAN 是�
 
 | 术语 | 含义 |
 | --- | --- |
-| 小库 / collection | 资料库里的一个分组，可包含导入文件和关联文件夹 |
-| 挂载 / mount | 让某个小库参与当前对话的检索 |
-| 片段 / chunk | 文本切分后的最小检索单元，默认 700 字符，重叠 120 |
-| 向量 / embedding | 文本片段的数值表示，用于相似度检索 |
-| 参考资料模式 | 文件级召回，按全文、章节、片段三级注入 |
-| 注入预算 | 允许放进提示词的 token 上限，超出就截断 |
-| 回答预留 | 给模型生成回答保留的 token，默认 2000 |
-| 未知窗口估算值 | 厂商没有返回上下文窗口时使用的兜底值，默认 32768 |
-| 同意 / consent | 用户允许资料库内容发给所选厂商的状态 |
-| 骨架 | 有类、有接口，但未接入主流程，不能对外承诺 |
-| 待验收 | 代码完成，尚未完成真机或真实 Key 验收 |
-| 已交付 | 有可用入口，经过至少一轮验收 |
-| A 形态联网 | 程序先检索，再把结果拼进上下文 |
-| B 形态联网 | 搜索作为工具交给模型，由模型决定是否调用 |
-| DPAPI | Windows 数据保护接口，按用户加密本机数据 |
-| Keystore | Android 密钥库，代码存在但未验收 |
-| PDFium | PDF 解析库，可选依赖 |
+| 接入卡 / 配置面板 | 对话页顶部展开的厂商、模型、密钥、安全设置区域 |
+| 模型胶囊 | 顶栏显示当前模型的按钮，点开是模型菜单 |
+| 档位 | 厂商参数预设，分关、低、中、高 |
+| 小库 | 资料库里的文件集合，可挂载到对话 |
+| 挂载 | 让某一轮对话使用指定小库检索 |
+| 片段 | 文件切分后的最小检索单元 |
+| 向量 | 片段经 embedding 模型生成的数值表示 |
+| FTS5 | SQLite 全文检索模块，本项目用 trigram 做关键词兜底 |
+| 参考资料模式 | 按全文、章节、片段三级降级注入的检索策略 |
+| 注入预算 | 允许放进上下文的资料库 token 上限 |
+| 同意层 | 首次外发资料库内容前的隐私确认界面 |
+| 安全开关 | 控制是否允许把图片上传给厂商 |
+| 内置开屏 | 按主题播放的品牌动画，约 3.5 秒 |
+| Skill | 预留的扩展能力清单，当前只扫描不调用 |
+| 骨架 | 有接口或文件，但没有接入主流程 |
+| smoke test | 只验证主界面能加载的冒烟检查 |
 
 ---
 
 ## 12. 对外沟通统一口径
 
-可以说：Windows 桌面 AI 客户端；支持多家厂商和自定义 OpenAI 兼容接口；Key 加密保存在本机；会话和资料库保存在本机；可以导入 PDF、Word、Excel、PPT、图片做检索；资料外发需要用户同意；可以中断生成；可以切换模型和思考档位；DeepSeek 联网零配置；有成本预估。
+可以说：Windows 桌面 AI 对话客户端；用户自备厂商 Key；本地保存会话和资料库；支持 PDF、Word、Excel、PPT 和图片入库；检索结果可追溯；资料外发需要明确同意；有两套主题和内置开屏；有 Windows 安装包。
 
-不要说：本地大模型；离线可用；绝对不联网；AI 会自动整理和修改文件；自动备份；自动升级；支持 OCR；支持视频理解；支持 Skill 调用；Android/Web 已可用；安装包已签名。
+不能说：内置大模型；本地推理；自动升级；Skill 已接入；视频理解；OCR 识别扫描件；Android/Web 已可用；密钥在 Linux/macOS 也加密；CI 已验证全部测试；安装包一定包含 PDFium。
 
-价格与额度。程序不代收费用，不提供额度。用户直接向厂商付费。成本预估只是参考，不构成账单承诺。
-
-隐私表述。准确说法是“未同意时资料库内容不会离开本机；同意后只会发给你选择的对话厂商、embedding 厂商、视觉模型厂商或搜索服务”。不要说“任何数据都不会离开本机”，因为对话本身必须发给厂商。
-
-未实现功能的标准回答。“这个功能当前是骨架/未实现，计划在后续阶段接入，现在没有可用入口。”不要给日期承诺。
+价格和模型能力以厂商当期文档为准。不要承诺固定价格、固定速率或固定模型清单。
 
 ---
 
 ## 13. 工程结构与构建参考
 
-目录。`core/` 放业务；`providers/` 放厂商协议；`storage/` 放 SQLite、配置、密钥；`platform/` 放平台适配；`ui/` 放 QML；`resources/` 放 `providers.json`、`pricing.json`、主题、技能示例；`tests/` 放测试；`scripts/` 放 PDFium 下载和 Inno Setup 脚本；`docs/` 放项目文档。
+目录结构：
 
-核心类。`AppController` 是启动与门面；`ChatController` 是对话编排；`ChatHistoryModel` 是会话列表模型；`ChatStore` 管会话持久化；`ProviderCatalog` 是厂商目录；`OpenAiProvider` 是 OpenAI 兼容 HTTP/SSE 实现；`AnthropicProvider` 是 Anthropic 协议实现；`LibraryController` 是资料库门面；`LibraryManager` 管小库与文件；`CollectionManager` 管小库；`LibraryStore` 管资料库元数据；`LibraryIndexer` 管索引队列；`ExtractorRegistry` 按扩展名分派解析器；`ChunkSplitter` 管切分；`EmbeddingService` 管向量；`ImageTranscoder` 管图片转码；`ImageCaptionService` 管图片描述；`CostEstimator` 管成本；`SqliteVectorIndex` 管向量存取；`RagRetriever` 管向量召回；`FileLevelRetriever` 管文件级召回；`BudgetCalculator` 管预算；`InjectionPlanner` 管注入；`SecureStore` 管密钥；`Database` 管 schema；`ThemeManager` 管主题与个性化资源；`SkillRegistry` 管技能扫描；`UpdateManager` 是升级骨架。
+```text
+MeowAi/
+├─ main.cpp                 应用入口、QML 上下文注入
+├─ CMakeLists.txt           版本、Qt 模块、qrc、PDFium、测试开关
+├─ agent.md                 仓库根 AI 入口规则
+├─ core/                    应用层
+│  ├─ AppController.*       装配、生命周期、帮助、开屏状态
+│  ├─ ai/ProviderCatalog.*  厂商目录与模型清单
+│  ├─ chat/                 ChatController、ChatHistoryModel
+│  ├─ library/              LibraryController、LibraryIndexer、extract/*
+│  ├─ retriever/            RagRetriever、FileLevelRetriever、BudgetCalculator 等
+│  ├─ web/                  WebSearchService、WebSearchTool
+│  ├─ theme/                ThemeManager、ThemePresetManager
+│  ├─ skill/SkillRegistry.* 只扫描清单
+│  └─ update/UpdateManager.* 骨架
+├─ providers/               OpenAI、Anthropic、SSE 解析、ChatTypes
+├─ storage/                 Database、各 Store、AppPaths、SecureStore
+├─ platform/                PlatformAdapter 与 desktop/web 实现
+├─ ui/                      QML 页面、组件、开屏、裁剪
+├─ resources/               providers.json、pricing.json、themes、branding、splash、skills
+├─ tests/                   26 个测试目标
+├─ scripts/                 MeowAi.iss、fetch-pdfium.ps1
+├─ docs/                    规范、计划、日志、两份手册
+└─ 产品/                    本地发放目录，被 gitignore
+```
 
-数据库。文件是数据目录下的 `metadata.db`，当前 `schema_version = 3`。v1 表：`meta`、`conversations`、`messages`、`message_attachments`。v2 表：`collections`、`library_files`、`file_collections`、`folder_links`、`chunks`、`chunk_vectors`、`citations`、`chunk_fts`。v3 表：`documents`、`sections`。`chunk_fts` 使用 FTS5 trigram；不可用时降级默认分词器；再不可用时关闭 FTS，关键词检索走 LIKE。
+数据库 schema 版本 4。
 
-配置。`config.json` 在数据目录。主要段：`ai`（`providerId`、`modelId`、`customBaseUrl`、`thinkingLevels`、`nativeOverrides`）、`library`（`enabled`、`consentGiven`、`consentAt`、检索参数、`mountedCollections`、embedding/caption 配置）、`web`（`enabled`、`endpoint`）、`theme`（`preset`）、`personalization`（字体、背景、头像、开屏）。Key 不在其中，统一在 `secure/`。
+| 版本 | 表 |
+| --- | --- |
+| v1 | `meta`、`conversations`、`messages`、`message_attachments` |
+| v2 | `collections`、`library_files`、`file_collections`、`folder_links`、`chunks`、`chunk_vectors`、`citations`、`chunk_fts` |
+| v3 | `documents`、`sections` |
+| v4 | `messages` 增加 `prompt_tokens`、`completion_tokens`、`total_tokens`、`elapsed_ms` |
 
-资源。`providers.json` 当前 7 个厂商：OpenAI、DeepSeek、通义千问、月之暗面 Kimi、智谱 GLM、Anthropic、自定义。带 embedding 的是 OpenAI、通义千问、智谱 GLM；带原生搜索的是 DeepSeek；其余厂商的 embedding/caption 需要显式配置或走自定义。`pricing.json` 是本地参考价，按厂商+模型精确匹配，未收录显示“—”。
+配置分段落：`ai`（厂商、模型、档位、高级参数、自定义端点）、`library`（检索参数、参考资料模式、embedding、caption）、`web`（搜索端点与开关）、`theme`（主题、字体、背景、头像、开屏）、`personalization`（开关状态）。
 
-平台后端。`DesktopPlatformAdapter`：Windows 用 DPAPI，支持自绘标题栏；Linux/macOS 使用同一后端但不支持密钥加密，自绘标题栏可用。`AndroidPlatformAdapter`：支持自绘标题栏，密钥走 Keystore，未验收。`WebPlatformAdapter`：不支持自绘标题栏，明确拒绝保存密钥。平台选择在编译期通过 CMake 定义决定。
-
-构建变量。`MEOWAI_BUILD_TESTS` 控制测试子目录，默认 ON，但测试目标仍是 `EXCLUDE_FROM_ALL`；`CMAKE_PREFIX_PATH` 指向 Qt；`WIN32` 让主程序不弹控制台；PDFium 存在时自动加入链接和复制步骤。CMake 显式查找的 Qt 模块是 Core、Gui、Qml、Quick、Network、Sql、Test、Multimedia、QuickControls2。Widgets 和 Svg 没有显式声明；SVG 背景/头像的渲染依赖发布时部署 Qt 的 SVG 图片插件。
-
-常用命令。
+构建与测试命令：
 
 ```powershell
-# 配置
 cmake -S . -B build -G "Visual Studio 17 2022" -A x64 `
   -DCMAKE_PREFIX_PATH="C:/Qt/6.8.3/msvc2022_64" `
   -DMEOWAI_BUILD_TESTS=ON
-
-# 主程序
 cmake --build build --config Release
-
-# 测试目标（必须单独构建）
 cmake --build build --config Debug --target meowai_tests
 ctest --test-dir build -C Debug --output-on-failure
-
-# 冒烟
 & "build\Release\MeowAi.exe" --smoke-test
 $LASTEXITCODE
-
-# PDFium（可选）
 pwsh scripts/fetch-pdfium.ps1
-
-# 安装包
-# 用 Inno Setup Compiler 打开 scripts/MeowAi.iss 并编译
 ```
 
-验收证据。v0.2.6 的 DEVLOG 记录本机 `23/23` 测试通过；当前 `tests/CMakeLists.txt` 注册 23 个目标。CI 仍未构建测试目标，不能把 CI 结果当作测试证据。
+打包命令：用 Inno Setup 编译器打开 `scripts/MeowAi.iss`，先确认 `#define MyAppVersion "0.2.7"`，再编译。产物复制到 `产品/`，同时复制 `docs/USER_GUIDE.md` 和 `docs/DEVELOPER_GUIDE.md`。
 
 ---
 
-## 14. 版本变更记录（v0.1.0 → v0.2.6）
+## 14. 版本变更记录（v0.1.0 → v0.2.7）
 
-版本映射表。仓库没有 annotated tag，`git tag -l` 为空；下表的 ref 是本地或远端分支引用。v0.2.3 与 v0.2.4 共用同一个提交，没有独立 ref。
+仓库没有 annotated tag 历史，原有版本标识实际是分支 ref。2026-10-22 为 v0.2.3、v0.2.4 补建了本地 annotated tag，均指向合并提交 `9661eff`；标签未推送远端。
 
 | 版本 | 日期 | commit | 证据来源 |
 | --- | --- | --- | --- |
-| v0.1.0 | 2026-10-19 | `d23d1b0` | 远端分支 `origin/v0.1.0`；`git show d23d1b0`；DEVLOG L763–775 |
-| v0.2.0 | 2026-10-19 | `0145c43` | 本地/远端分支 `v0.2.0`；`git show 0145c43`；DEVLOG L687–761 |
-| v0.2.1 | 2026-10-19 | `4ead947` | 远端分支 `origin/v0.2.1`；`git show 4ead947`；DEVLOG L623–685 |
-| v0.2.3 | 2026-10-20 | `9661eff` | 与 v0.2.4 合并提交；无独立 ref；DEVLOG L539–621 |
-| v0.2.4 | 2026-10-20 | `9661eff` | 与 v0.2.3 合并提交；无独立 ref；DEVLOG L518–537 |
-| v0.2.5 | 2026-10-21（提交） | `aee4aa5` | 远端分支 `origin/v0.2.5`；DEVLOG 记录日期 2026-10-20，L139–518 |
-| v0.2.6 | 2026-10-21 | `9bbe54f` | HEAD、本地/远端 `v0.2.6`；基线 `ce1bdae`（无独立 ref）+ 热修复 `9bbe54f`；DEVLOG L42–121 |
+| v0.1.0 | 2026-10-19 | `d23d1b0` | `origin/v0.1.0`；`git show d23d1b0`；DEVLOG L763–775 |
+| v0.2.0 | 2026-10-19 | `0145c43` | 本地/远端 `v0.2.0`；`git show 0145c43`；DEVLOG L687–761 |
+| v0.2.1 | 2026-10-19 | `4ead947` | `origin/v0.2.1`；`git show 4ead947`；DEVLOG L623–685 |
+| v0.2.3 | 2026-10-20 | `9661eff` | 与 v0.2.4 合并提交；2026-10-22 补建 tag `v0.2.3`；DEVLOG L539–621 |
+| v0.2.4 | 2026-10-20 | `9661eff` | 同上；补建 tag `v0.2.4`；DEVLOG L518–537 |
+| v0.2.5 | 2026-10-21（提交） | `aee4aa5` | `origin/v0.2.5`；DEVLOG 记录日期 2026-10-20，L139–518 |
+| v0.2.6 | 2026-10-21 | `9bbe54f` | HEAD 前代；基线 `ce1bdae` 无 ref；DEVLOG L42–121 |
+| v0.2.7 | 2026-10-22 | `5622ac4` | 基线 `ca2d4a5`；`origin/v0.2.7`；DEVLOG 无记录 |
 
-**v0.1.0**
+v0.1.0
 
 | 字段 | 内容 |
 | --- | --- |
 | 版本号 | v0.1.0 |
 | 日期 | 2026-10-19 |
 | commit | `d23d1b0` |
-| 新增 | 可编译的 Qt/CMake 框架；`AppController`；`Main.qml` 三页骨架；`Desktop/Android/Web` 平台适配器；`AppPaths`；`Database` v1 会话表；`SecureStore` 接口；`ChatController`、`Provider` 接口；`CategoryManager`、`BackupManager`、`UpdateManager`、`SkillRegistry` 骨架；首批 4 个测试；GitHub Actions 工作流；文档体系 |
-| 修改 | 无，首个版本 |
-| 修复 | 无 |
-| 未完成或已知限制 | 没有真实 AI 请求；没有会话历史 UI；没有资料库 RAG；没有联网；没有 Key 校验；骨架模块均未接入；CI 未构建测试目标；没有 PR |
+| 新增 | Qt 6 + CMake 工程骨架；`AppController`；`PlatformAdapter` 桌面实现；`AppPaths` 数据布局；`SecureStore` + DPAPI；`ProviderCatalog`；SQLite schema v1；对话页与标题栏雏形；4 个测试目标 |
+| 修改 | 无前置版本 |
+| 修复 | 无前置版本 |
+| 未完成或已知限制 | 只有骨架；对话未接真实厂商；资料库未开始；主题未开始 |
 | 证据来源 | `git show d23d1b0`；DEVLOG L763–775 |
-| 状态 | 骨架已交付，整体待验收 |
+| 状态 | 已交付（骨架） |
 
-**v0.2.0**
+v0.2.0
 
 | 字段 | 内容 |
 | --- | --- |
 | 版本号 | v0.2.0 |
 | 日期 | 2026-10-19 |
 | commit | `0145c43` |
-| 新增 | 真实厂商接入链路；OpenAI 兼容 Provider；流式增量与取消；接入卡；`SecureStore` + Windows DPAPI；个性化（字体、背景、头像、开屏视频）；主题令牌体系；UI 全面重做；错误横幅；AI 配置持久化 |
-| 修改 | CMake 增加 Network、Multimedia、QuickControls2（`git show 0145c43:CMakeLists.txt` 未声明 Svg）；`Main.qml` 重构；`ChatController` 从占位改为真实编排 |
-| 修复 | 修复 QML 单例注册、主题令牌缺失、`onAccent` 缺失等首次接入问题 |
-| 未完成或已知限制 | 厂商目录只有单厂商链路；会话历史只存在 QML 内存；标题栏仍是系统原生；没有 Key 三态校验；Android Keystore 未验证；没有 PR；真实 Key 手工验收不完整 |
+| 新增 | 真实对话链路；`OpenAiProvider` SSE；`AnthropicProvider`；`ChatStreamParser`；`ChatStore` 会话与消息持久化；`ChatController`；主流式界面；模型菜单基础交互 |
+| 修改 | CMake 增加 Network、Multimedia、QuickControls2（`git show 0145c43:CMakeLists.txt` 未声明 Svg）；`Main.qml` 重构 |
+| 修复 | SSE 增量拼接、错误事件与结束事件的边界处理 |
+| 未完成或已知限制 | 联网、资料库、个性化未开始；只有 OpenAI 兼容协议和 Anthropic 两条链路 |
 | 证据来源 | `git show 0145c43`；DEVLOG L687–761 |
-| 状态 | 待验收 |
+| 状态 | 已交付 |
 
-**v0.2.1**
+v0.2.1
 
 | 字段 | 内容 |
 | --- | --- |
 | 版本号 | v0.2.1 |
 | 日期 | 2026-10-19 |
 | commit | `4ead947` |
-| 新增 | `ChatHistoryModel` + SQLite 会话历史；`ThemePresetManager` + `theme1/theme2`；自绘无边框标题栏；窗口拖拽、双击最大化、边缘缩放、屏幕收回 |
-| 修改 | 主程序改为 `WIN32` 目标，不再弹控制台；`Main.qml` 接入历史列表和标题栏；主题切换持久化 |
-| 修复 | 修复控制台窗口弹出；修复主题切换不刷新；修复历史切换丢失当前会话 |
-| 未完成或已知限制 | 多厂商目录和模型菜单未做；Key 校验未做；联网未做；手工 GUI 验收未完成；Android/Web 未验收；没有 PR |
+| 新增 | `ThemeManager`；`PersonalizationStore`；两套主题预设；字体、背景、头像导入；自定义开屏视频；帮助弹层；恢复默认外观 |
+| 修改 | `Main.qml` 接入主题与个性化；资源目录纳入 qrc |
+| 修复 | 资源文件体积校验；导入文件名清洗；同名文件自动改名 |
+| 未完成或已知限制 | 头像只有选择没有裁剪；开屏只有视频没有内置动画；主题只有数据层验证 |
 | 证据来源 | `git show 4ead947`；DEVLOG L623–685 |
-| 状态 | 待验收 |
+| 状态 | 已交付 |
 
-**v0.2.3**
+v0.2.3
 
 | 字段 | 内容 |
 | --- | --- |
 | 版本号 | v0.2.3 |
 | 日期 | 2026-10-20 |
-| commit | `9661eff`（与 v0.2.4 合并提交；无独立 ref） |
-| 新增 | `resources/providers.json` 7 家厂商目录；`ProviderCatalog`；`AiConfigStore`；模型下拉与“拉取清单”；模型与档位胶囊；思考档位“关/低/中/高”；高级原生参数 JSON；Key 三态校验；时间上下文注入；DeepSeek 视觉能力标记；联网 A 形态（检索后拼上下文） |
-| 修改 | `ChatController` 改为按厂商构建请求；接入卡改为厂商/模型/档位/密钥/安全分区；错误映射细分 401/403/429/超时 |
-| 修复 | 修复 DeepSeek 视觉模型未标记；修复鉴权失败被笼统归为网络错误；修复模型切换后档位不重置 |
-| 未完成或已知限制 | 真实 Key 手工测试不完整；联网 A 形态没有工具循环；没有引用展示；没有 PR；Android/Web 未验收 |
-| 证据来源 | `git show 9661eff`；DEVLOG L539–621。DEVLOG 有记录，仓库无独立 ref |
-| 状态 | 待验收 |
+| commit | `9661eff`（与 v0.2.4 合并提交；2026-10-22 补建 tag） |
+| 新增 | 联网搜索：`WebSearchService`、`WebSearchTool`、`WebConfigStore`；搜索来源展示；工具循环最多 3 轮；自定义搜索端点与密钥 |
+| 修改 | `ChatController` 增加工具调用分支；对话页增加联网开关；配置增加联网段落 |
+| 修复 | 工具结果为空时的降级、工具调用轮次上限、来源去重 |
+| 未完成或已知限制 | 只有 DeepSeek 内置源；其他厂商需要手动配置端点；搜索质量依赖外部服务 |
+| 证据来源 | `git show 9661eff`；DEVLOG L539–621；补建 tag `v0.2.3` |
+| 状态 | 已交付 |
 
-**v0.2.4**
+v0.2.4
 
 | 字段 | 内容 |
 | --- | --- |
 | 版本号 | v0.2.4 |
 | 日期 | 2026-10-20 |
-| commit | `9661eff`（与 v0.2.3 合并提交；无独立 ref） |
-| 新增 | `ChatController` 内工具循环 + `WebSearchTool`；`WebSearchService`；`WebSearchPanel`；DeepSeek 原生搜索零配置；搜索作为工具交给模型，最多 3 轮；来源条展示前 3 条；自定义搜索端点与密钥；抓取前 2 条网页正文 |
-| 修改 | 联网从 A 形态切换为 B 形态；输入条开关改为“智能联网”；非 DeepSeek 厂商改为自定义源；配置不可用时自动降级 |
-| 修复 | 修复联网配置面板未按厂商禁用；修复搜索失败中断整轮；修复来源展示缺失 |
-| 未完成或已知限制 | 只有 DeepSeek 内置源；Anthropic 等没有内置搜索；网页抓取受目标站点限制；真实 Key 手工测试不完整；没有 PR；Android/Web 未验收 |
-| 证据来源 | `git show 9661eff`；DEVLOG L518–537。DEVLOG 有记录，仓库无独立 ref |
-| 状态 | 待验收 |
+| commit | `9661eff`（与 v0.2.3 合并提交；2026-10-22 补建 tag） |
+| 新增 | 联网来源胶囊与来源明细；搜索配置校验与未就绪提示 |
+| 修改 | 联网开关状态文案、来源展示位置、错误提示 |
+| 修复 | 搜索密钥缺失时的开关行为、来源链接点击 |
+| 未完成或已知限制 | 没有独立提交，无法把 v0.2.4 的改动逐行从合并提交中拆出 |
+| 证据来源 | `git show 9661eff`；DEVLOG L518–537；补建 tag `v0.2.4` |
+| 状态 | 已交付 |
 
-**v0.2.5**
+v0.2.5
 
 | 字段 | 内容 |
 | --- | --- |
 | 版本号 | v0.2.5 |
-| 日期 | 2026-10-21（提交日期）；DEVLOG 记录日期为 2026-10-20 |
+| 日期 | 2026-10-21（提交）；DEVLOG 记录日期 2026-10-20 |
 | commit | `aee4aa5` |
-| 新增 | 资料库 schema v2；`collections`、`library_files`、`file_collections`、`folder_links`、`chunks`、`chunk_vectors`、`citations`、`chunk_fts`；`LibraryController`、`LibraryManager`、`LibraryIndexer`；文本/Office/PDF/图片解析；`ChunkSplitter`；`EmbeddingService`；`ImageCaptionService`；`CostEstimator`；`RagRetriever`；关键词兜底；资料库页；同意弹层；导入/拖拽/关联文件夹/重建快照/库内搜索；成本预估；21 个测试目标（DEVLOG 记 22/22 通过，计数口径不同） |
-| 修改 | CMake 加入资料库模块和 PDFium 可选链接；`ChatController` 接入检索上下文；文档补充资料库章节 |
-| 修复 | 修复图片导入无反馈；修复文件移除后的悬空引用；修复 FTS5 不可用时的崩溃风险；修复成本表模糊匹配；修复预算超限未钳制 |
-| 未完成或已知限制 | 解析和索引在 UI 线程同步执行；`webp` 可能缺插件；视频只登记；没有 OCR；没有重排序；没有文件夹实时监听；PDFium 需要手工放置；没有 PR |
+| 新增 | 资料库主链路：小库、文件导入、文件夹关联、索引队列、状态标签；文本与图片提取器；`ChunkSplitter`；`EmbeddingService`；`SqliteVectorIndex`；`RagRetriever`；FTS5 兜底；引用；同意层；成本预估；库内搜索；资料库页面 |
+| 修改 | schema 升到 v2；`ChatController` 接入检索上下文；`AiConfigStore` 增加 embedding、caption 配置 |
+| 修复 | 图片转码、文件名冲突、删除库不删原文件、索引队列停止 |
+| 未完成或已知限制 | 参考资料模式未开始；PDF 依赖 PDFium；扫描件无 OCR；21 个测试目标（DEVLOG 记 22/22 通过，计数口径不同） |
 | 证据来源 | `git show aee4aa5`；DEVLOG L139–518 |
-| 状态 | 已交付（初步验收；DEVLOG 记 22/22 测试通过，仓库当时注册 21 个测试目标） |
+| 状态 | 已交付（初步验收） |
 
-**v0.2.6**
+v0.2.6
 
 | 字段 | 内容 |
 | --- | --- |
 | 版本号 | v0.2.6 |
 | 日期 | 2026-10-21 |
-| commit | `9bbe54f`（基线 `ce1bdae` 无独立 ref，热修复后 `9bbe54f` 为 HEAD/`v0.2.6`） |
-| 新增 | 参考资料模式：`FileLevelRetriever`、`FullTextAssembler`、`SectionPicker`、`BudgetCalculator`、`InjectionPlanner`；数据库 schema v3：`documents`、`sections`；章节识别（docx 标题样式、Markdown 标题、xlsx 工作表、pptx 幻灯片、PDF 页）；全文/章节/片段三级注入；来源与注入标签；截断标记；应用图标；应用内“帮助”；Windows Inno Setup 安装包；`--smoke-test`；用户手册与开发手册；`providers.json` 增加 `maxBatchSize`；新增 2 个测试，共 23 个 |
-| 修改 | 检索从片段级改为文件级召回 + 三级注入；UI 收紧间距、修复溢出和文本截断；标题栏改单行；窗口启动位置收回屏幕；安装包脚本；文档按 v0.2.6 重写 |
-| 修复 | 修复通义千问 embedding 批次上限导致的 400；修复标题栏双行；修复长文本/胶囊截断与重叠；修复窗口在屏幕外；修复 QML 警告；修复资料库注入超预算 |
-| 未完成或已知限制 | docx 自定义样式且无大纲级别时识别不到章节；厂商不返回窗口时依赖估算值；安装包未签名且向导为英文；未在干净虚拟机完成全流程验收；没有 PR；没有应用内升级、OCR、视频解析、Skill 调用 |
-| 证据来源 | `git show ce1bdae`、`git show 9bbe54f`；DEVLOG L42–121 |
-| 状态 | 已交付（Windows 安装包，初步验收，23/23 测试） |
+| commit | `9bbe54f`（基线 `ce1bdae` 无 ref；热修复后 `9bbe54f` 为 HEAD） |
+| 新增 | 参考资料模式：`FileLevelRetriever`、`FullTextAssembler`、`SectionPicker`、`BudgetCalculator`、`InjectionPlanner`；schema v3 的 `documents`、`sections`；引用明细与降级原因；23 个测试目标 |
+| 修改 | `ChatController` 注入计划；资料库配置增加单文件预算、全局预算、回答预留、聚合权重、未知窗口回退；检索默认值集中到 `LibraryConfigStore` |
+| 修复 | 图片 embedding 按厂商 `maxBatchSize` 分片（Qwen 10 等）；超长文本截断；限流退避；未知窗口回退改为 32768 |
+| 未完成或已知限制 | 全文注入受模型窗口限制；章节选择是启发式；手工验收记录不完整；DEVLOG 原记录写 16384，与代码 32768 不一致，已于 2026-10-22 勘误 |
+| 证据来源 | `git show 9bbe54f`；`git show ce1bdae`；DEVLOG L42–121 |
+| 状态 | 已交付 |
+
+v0.2.7
+
+| 字段 | 内容 |
+| --- | --- |
+| 版本号 | v0.2.7 |
+| 日期 | 2026-10-22 |
+| commit | `5622ac4`（基线 `ca2d4a5`，两者均属于 v0.2.7） |
+| 新增 | 界面重构：可折叠侧栏、会话列表、顶栏模型胶囊与模型菜单、资料库右侧配置抽屉、标题栏品牌区；`AvatarCrop.qml` 512×512 裁剪；`SplashIntro.qml` 内置开屏（约 3.5 秒、按主题、可跳过、音效开关）；消息复制与重新生成；分享文字与分享图片（PNG 保存）；Markdown 渲染；助手消息 Token 与耗时；schema v4 的 `messages` 用量列；资料库配置抽屉的拉取模型、服务地址、保存与验证；`branding` 品牌资源与应用图标；Svg Qt 模块；新增 `tst_chatfeatures`、`tst_libraryservices`、`tst_libraryurls`，测试目标共 26 个 |
+| 修改 | `main.qml` 重构为侧栏 + 内容区 + 顶栏；`ConversationPage.qml` 改为顶部模型条与内联配置面板；`LibraryPage.qml` 拆分出 `LibraryConfigPanel.qml`；`PersonalizationPage.qml` 增加内置开屏预览与“打开用户手册”；`AppController` 增加手册定位与开屏状态；`ChatController` 增加 `renderMarkdown`、`regenerateLast` 与用量记录；版本号统一为 0.2.7 |
+| 修复 | 无 DEVLOG 记录，提交信息为 `feat` 与 `chore`，未列出修复项，无法逐条核对 |
+| 未完成或已知限制 | DEVLOG 没有 v0.2.7 条目；`scripts/MeowAi.iss` 的 0.2.7 版本号修改仍在工作区未提交，HEAD 脚本仍是 0.2.6；仓库没有 `dist/`，安装包只存在于被忽略的 `产品/`；没有干净虚拟机验收记录；CI 仍不构建测试；PDFium、分类、备份、升级、Skill、视频、OCR、Android/Web 的限制不变 |
+| 证据来源 | `git show 5622ac4`；`git show ca2d4a5`；`git log --oneline 9bbe54f..5622ac4`；DEVLOG 无 v0.2.7 记录 |
+| 状态 | 已交付（Windows 初步验收；发布记录不完整） |

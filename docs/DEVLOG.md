@@ -100,7 +100,7 @@
 - **交付内容**：
   - **schema v3 增量迁移**（`storage/Database.cpp`）：新增 `documents`（token 估算 / 章节来源 / 章节数）与 `sections`（章节序号 / 标题 / chunk 区间 / token）两表，全部 `IF NOT EXISTS`，与 v1/v2 完全解耦；**不复制全文**（全文仍由 `chunks` 按 `ordinal` 拼接），旧文件无元数据时自动回退片段模式，**无需重建索引**
   - **新增存储层 `storage/DocumentStore`**：documents / sections 纯 CRUD，upsert 走事务，级联删除
-  - **新增 `core/retriever/BudgetCalculator`**：上下文窗口钳制纯函数（`剩余 = contextWindow - 历史 - 回答预留`，逐级取 min），窗口未知时回退 16384 并给出中文降级说明
+  - **新增 `core/retriever/BudgetCalculator`**：上下文窗口钳制纯函数（`剩余 = contextWindow - 历史 - 回答预留`，逐级取 min），窗口未知时回退 32768 并给出中文降级说明（2026-10-22 勘误：原记录写 16384，代码默认值为 32768，见 `storage/LibraryConfigStore.h`）
   - **新增 `FullTextAssembler`**：按 ordinal 拼接 + 相邻片段重叠去重（`前块尾 == 后块头` 精确匹配），`assembleRange()` 供章节级复用
   - **新增 `SectionPicker`**：以「章节内最高片段相似度」排序选章，超预算章节跳过并记录
   - **新增 `InjectionPlanner`**：单文件三级决策 **全文 → 章节 → 片段**，每级降级都产出 `trace`；片段回退用 `QHash<ordinal, chunk>` 预建索引，避免逐条线性查找
