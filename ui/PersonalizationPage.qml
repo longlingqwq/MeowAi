@@ -324,7 +324,12 @@ Item {
                 id: avatarDialog
                 title: qsTr("选择头像图片")
                 nameFilters: [qsTr("图片 (*.png *.jpg *.jpeg *.webp *.bmp *.gif *.svg)")]
-                onAccepted: Personalize.setAvatar(selectedFile.toString())
+                onAccepted: avatarCrop.start(selectedFile.toString())
+            }
+
+            // 头像裁剪弹层：原图只读，取消 / 关闭不会修改现有头像
+            AvatarCrop {
+                id: avatarCrop
             }
 
             // ------------------------------------------------ 开屏动画
@@ -348,11 +353,12 @@ Item {
                         border.width: 1
                         border.color: Theme.hairline
 
-                        EyeMark {
+                        BrandLogo {
                             anchors.centerIn: parent
                             width: 44
                             height: 44
-                            opacity: Personalize.splashSource !== "" ? 0.85 : 0.22
+                            markOnly: true
+                            opacity: Personalize.splashSource !== "" ? 0.85 : 0.55
                         }
 
                         MChip {
@@ -361,7 +367,7 @@ Item {
                             anchors.bottomMargin: 8
                             tone: Personalize.splashSource !== "" ? "ok" : "neutral"
                             dot: true
-                            text: Personalize.splashSource !== "" ? qsTr("已设置") : qsTr("未设置")
+                            text: Personalize.splashSource !== "" ? qsTr("自定义") : qsTr("内置")
                         }
                     }
 
@@ -374,7 +380,7 @@ Item {
                         }
 
                         Text {
-                            text: qsTr("启动时播放一段本地视频（含其自带音轨），播放结束或点击「跳过」即进入主界面。")
+                            text: qsTr("未设置自定义内容时按当前主题播放内置开屏，设置后以自定义内容为准。播放结束或点击「跳过」即进入主界面。")
                             color: Theme.textFaint
                             font.pixelSize: Theme.fSmall
                             width: Math.min(page.width - 220, 420)
@@ -395,7 +401,7 @@ Item {
                             MButton {
                                 text: qsTr("预览")
                                 small: true
-                                enabled: Personalize.available && Personalize.splashSource !== ""
+                                enabled: Personalize.available
                                 onClicked: page.previewSplash()
                             }
 
@@ -513,6 +519,10 @@ Item {
             /// 帮助弹层：开发者与联系方式为固定信息，与《用户手册》保持一致
             Popup {
                 id: helpDialog
+
+                /// 手册缺失提示：仅由 App.openUserGuide() 的返回值驱动
+                property bool guideMissing: false
+
                 parent: Overlay.overlay
                 width: Math.min(520, parent ? parent.width - 48 : 520)
                 height: Math.min(helpContent.implicitHeight + Theme.s5 * 2,
@@ -523,6 +533,8 @@ Item {
                 modal: true
                 focus: true
                 closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
+
+                onOpened: guideMissing = false
 
                 background: Rectangle {
                     radius: Theme.rLg
@@ -545,9 +557,10 @@ Item {
                         Row {
                             spacing: Theme.s2
 
-                            EyeMark {
+                            BrandLogo {
                                 width: 28
                                 height: 28
+                                markOnly: true
                                 anchors.verticalCenter: parent.verticalCenter
                             }
 
@@ -603,13 +616,32 @@ Item {
                             height: closeButton.height
 
                             MButton {
+                                text: qsTr("打开用户手册")
+                                variant: "primary"
+                                small: true
+                                anchors.left: parent.left
+                                anchors.verticalCenter: parent.verticalCenter
+                                onClicked: helpDialog.guideMissing = !App.openUserGuide()
+                            }
+
+                            MButton {
                                 id: closeButton
                                 text: qsTr("关闭")
                                 variant: "ghost"
                                 small: true
                                 anchors.right: parent.right
+                                anchors.verticalCenter: parent.verticalCenter
                                 onClicked: helpDialog.close()
                             }
+                        }
+
+                        Text {
+                            width: parent.width
+                            visible: helpDialog.guideMissing
+                            text: qsTr("未找到用户手册，请确认安装包完整。")
+                            color: Theme.warn
+                            font.pixelSize: Theme.fSmall
+                            wrapMode: Text.Wrap
                         }
                     }
                 }

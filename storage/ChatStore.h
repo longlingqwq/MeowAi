@@ -25,6 +25,11 @@ struct MessageRecord
     ///< "complete" | "streaming" | "partial" | "error"
     QString status = QStringLiteral("complete");
     qint64 createdAt = 0;
+    /// usage 与耗时：-1 表示未知（厂商未回传 / 失败 / 取消）
+    int totalTokens = -1;
+    int promptTokens = -1;
+    int completionTokens = -1;
+    qint64 elapsedMs = -1;
 };
 
 /**
@@ -59,6 +64,11 @@ public:
     /// 更新内容与状态（流式节流落库 / 终局落库共用）
     bool updateMessage(qint64 messageId, const QString &content, const QString &status,
                        QString *error) const;
+    /// 终局写入 usage 与耗时（与内容/状态解耦，避免流式节流覆盖）；-1 表示未知
+    bool updateMessageUsage(qint64 messageId, int totalTokens, int promptTokens,
+                            int completionTokens, qint64 elapsedMs, QString *error) const;
+    /// 删除单条消息（重新生成时删除最后一条助手消息）
+    bool removeMessage(qint64 messageId, QString *error) const;
 
     /// 启动时调用：把上次进程中断遗留的 streaming 行降级为 partial，避免永久卡在生成中
     bool demoteInterruptedMessages(QString *error) const;

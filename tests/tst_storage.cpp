@@ -144,7 +144,8 @@ void TstStorage::schemaV2CreatesLibraryTables()
     QSqlQuery version(db.handle());
     QVERIFY(version.exec(QStringLiteral("SELECT value FROM meta WHERE key = 'schema_version'")));
     QVERIFY(version.next());
-    QCOMPARE(version.value(0).toInt(), 2);
+    // v2 测试只要求库至少完成 v2 迁移；后续迁移（v3/v4）会继续抬高版本号
+    QVERIFY(version.value(0).toInt() >= 2);
 }
 
 void TstStorage::schemaV2MigrationIsIdempotentAndKeepsV1Tables()

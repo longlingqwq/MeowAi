@@ -48,6 +48,8 @@ class AppController : public QObject
     Q_PROPERTY(QString platformId READ platformId CONSTANT)
     Q_PROPERTY(bool customTitleBar READ customTitleBar CONSTANT)
     Q_PROPERTY(QString statusMessage READ statusMessage NOTIFY statusMessageChanged)
+    /// 用户手册是否存在于查找路径中（只读检测，不复制、不改写手册文件）
+    Q_PROPERTY(bool userGuideAvailable READ userGuideAvailable NOTIFY userGuideAvailabilityChanged)
 
 public:
     explicit AppController(QObject *parent = nullptr);
@@ -58,9 +60,15 @@ public:
     /// 本平台是否使用无边框自绘标题栏（仅桌面端；Android / Web 回退原生 chrome）
     bool customTitleBar() const;
     QString statusMessage() const;
+    bool userGuideAvailable() const;
 
     /// 准备本地目录、数据库与内置 Skill；任何失败都只体现在 statusMessage，不崩溃
     Q_INVOKABLE void initialize();
+
+    /// 用系统默认程序打开《用户手册》；文件不存在时返回 false（不复制、不改写手册）
+    Q_INVOKABLE bool openUserGuide();
+    /// 头像裁剪结果的临时文件 file:// URL（由 QML 渲染 512×512 PNG 后写入）
+    Q_INVOKABLE QString avatarCropTempUrl();
 
     ThemeManager *themeManager() const;
     /// 主题预设管理（功能 #11 衍生）：令牌换值、零代码换肤
@@ -88,9 +96,12 @@ public:
 
 signals:
     void statusMessageChanged();
+    void userGuideAvailabilityChanged();
 
 private:
     void setStatusMessage(const QString &message);
+    /// 按「程序目录 docs/ → 程序目录根 → 开发环境仓库 docs/」顺序定位手册
+    QString locateUserGuide() const;
 
     PlatformAdapter *m_platform = nullptr;
     std::unique_ptr<AppPaths> m_paths;
@@ -126,4 +137,8 @@ private:
     ThemePresetManager *m_themePresets = nullptr;
     UpdateManager *m_updateManager = nullptr;
     QString m_statusMessage;
+    /// 手册可用性缓存（初始化时检测，openUserGuide 前复检并按需发通知）
+    bool m_userGuideAvailable = false;
+    /// 同类裁剪临时文件的去重序号
+    int m_avatarCropSeq = 0;
 };

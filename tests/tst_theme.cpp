@@ -82,7 +82,7 @@ void TestTheme::defaultsWhenConfigMissing()
     QCOMPARE(theme.backgroundSource(), QString());
     QCOMPARE(theme.avatarSource(), QString());
     QCOMPARE(theme.splashSource(), QString());
-    QCOMPARE(theme.splashEnabled(), false);
+    QCOMPARE(theme.splashEnabled(), true); // 内置开屏默认开启
     QCOMPARE(theme.splashSoundEnabled(), true);
 }
 
@@ -334,7 +334,7 @@ void TestTheme::resetAllRestoresDefaults()
     QCOMPARE(theme.backgroundSource(), QString());
     QCOMPARE(theme.avatarSource(), QString());
     QCOMPARE(theme.splashSource(), QString());
-    QCOMPARE(theme.splashEnabled(), false);
+    QCOMPARE(theme.splashEnabled(), true); // 恢复默认后内置开屏开启
 
     PersonalizationStore rereadStore(paths.configFile());
     ThemeManager reread(paths, &rereadStore);
@@ -374,7 +374,7 @@ void TestTheme::splashLifecycle()
 
     QVERIFY(reread.clearSplash());
     QCOMPARE(reread.splashSource(), QString());
-    QCOMPARE(reread.splashEnabled(), false);
+    QCOMPARE(reread.splashEnabled(), true); // 清空自定义视频后保留开关，回落内置开屏
 }
 
 void TestTheme::systemFontRejectsUnknown()

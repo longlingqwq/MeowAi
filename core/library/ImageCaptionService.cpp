@@ -3,6 +3,10 @@
 #include "core/library/extract/ImageCaptionExtractor.h"
 #include "providers/AiProvider.h"
 
+#include <QBuffer>
+#include <QImage>
+#include <QTimer>
+
 namespace {
 
 /// 通用档：完整描述 + **强制逐字抄录**（一次调用同时拿描述与文字，不单独再接 OCR）
@@ -30,6 +34,19 @@ QString captionPrompt(const QString &profile)
     return QStringLiteral("你是资料库入库助手，请对这张图片输出结构化描述，供后续文字检索使用：\n"
                           "1) 先用一句话说明图片整体内容（主体、场景、类型）。\n")
         + QString::fromUtf8(kPromptCommonTail);
+}
+
+/// 校验用的内置极小图片（8×8 纯白 PNG，约数十字节）；不读取用户文件、不涉及任何隐私内容
+QByteArray tinyProbePng()
+{
+    QImage image(8, 8, QImage::Format_RGB32);
+    image.fill(Qt::white);
+    QByteArray bytes;
+    QBuffer buffer(&bytes);
+    if (!buffer.open(QIODevice::WriteOnly))
+        return bytes;
+    image.save(&buffer, "PNG");
+    return bytes;
 }
 
 }  // namespace
@@ -104,9 +121,126 @@ void ImageCaptionService::cancelAll()
     emit queueDrained();
 }
 
+void ImageCaptionService::validateConfig()
+{
+    // 同一服务校验期间禁止重复发起
+    if (m_validating)
+        return;
+
+    if (!m_provider || !m_provider->isConfigured() || m_caption.modelId.trimmed().isEmpty()) {
+        setValidation(Invalid, QStringLiteral("尚未配置可用于图片描述的视觉模型"));
+        return;
+    }
+    // 校验绝不打断正在进行的图片描述，也不改变队列/索引状态
+    if (m_busy) {
+        setValidation(Unverifiable, QStringLiteral("正在生成图片描述，请稍后校验"));
+        return;
+    }
+
+    const QByteArray png = tinyProbePng();
+    if (png.isEmpty()) {
+        setValidation(Unverifiable, QStringLiteral("无法生成校验图片"));
+        return;
+    }
+
+    ChatMessage message;
+    message.role = ChatMessage::User;
+    message.text = QStringLiteral("请只回复 OK");
+    ChatImage image;
+    image.bytes = png;
+    image.mimeType = QStringLiteral("image/png");
+    message.images.append(image);
+
+    ChatRequest request;
+    request.model = m_caption.modelId;
+    request.messages.append(message);
+    request.temperature = 0;
+    request.maxTokens = 16;
+    request.stream = false;
+    // 显式用户操作：可绕过「图片外发同意」开关，仅发送内置 8×8 白图
+    request.imagesConfirmed = true;
+
+    m_validating = true;
+    setValidation(Checking, QStringLiteral("正在校验视觉模型"));
+    m_provider->sendChat(request);
+}
+
+void ImageCaptionService::resetValidation()
+{
+    m_validating = false;
+    setValidation(Idle, QString());
+}
+
+QString ImageCaptionService::validationStatus() const
+{
+    switch (m_validationStatus) {
+    case Idle:
+        return QStringLiteral("idle");
+    case Checking:
+        return QStringLiteral("checking");
+    case Valid:
+        return QStringLiteral("valid");
+    case Invalid:
+        return QStringLiteral("invalid");
+    case Unverifiable:
+        return QStringLiteral("unverifiable");
+    }
+    return QStringLiteral("idle");
+}
+
+QString ImageCaptionService::validationMessage() const
+{
+    return m_validationMessage;
+}
+
+void ImageCaptionService::setValidation(ValidationStatus status, const QString &message)
+{
+    if (m_validationStatus == status && m_validationMessage == message)
+        return;
+    m_validationStatus = status;
+    m_validationMessage = message;
+    emit validationChanged();
+}
+
+void ImageCaptionService::finishValidation(const ChatResponse &response)
+{
+    m_validating = false;
+
+    if (!response.ok || response.error.isError()) {
+        ChatError error = response.error;
+        if (!error.isError()) {
+            error.code = ChatError::Unknown;
+            error.message = QStringLiteral("视觉模型校验失败");
+        }
+        failValidation(error);
+        return;
+    }
+
+    if (response.text.trimmed().isEmpty()) {
+        setValidation(Invalid, QStringLiteral("返回内容为空，无法确认模型可用"));
+        return;
+    }
+    setValidation(Valid, QStringLiteral("校验通过：视觉模型可用"));
+}
+
+void ImageCaptionService::failValidation(const ChatError &error)
+{
+    const bool unverifiable = error.code == ChatError::RateLimited || error.code == ChatError::Timeout
+                              || error.code == ChatError::NetworkUnavailable
+                              || error.code == ChatError::ServerError || error.code == ChatError::Cancelled
+                              || error.code == ChatError::Unknown;
+    setValidation(unverifiable ? Unverifiable : Invalid,
+                  validationFailureReason(error.httpStatus, error.code));
+}
+
 void ImageCaptionService::processNext()
 {
     if (m_busy) {
+        return;
+    }
+    // provider 同一时刻只能承载一个请求：校验进行中时让队列稍后再试
+    if (m_validating) {
+        QTimer::singleShot(300, this, &ImageCaptionService::processNext);
         return;
     }
 
@@ -173,6 +307,10 @@ void ImageCaptionService::processNext()
 
 void ImageCaptionService::onProviderFinished(const ChatResponse &response)
 {
+    if (m_validating) {
+        finishValidation(response);
+        return;
+    }
     if (!m_busy) {
         return;  // 非本服务发起的请求（如对话），一律忽略
     }
@@ -201,6 +339,11 @@ void ImageCaptionService::onProviderFinished(const ChatResponse &response)
 
 void ImageCaptionService::onProviderFailed(const ChatError &error)
 {
+    if (m_validating) {
+        m_validating = false;
+        failValidation(error);
+        return;
+    }
     if (!m_busy) {
         return;
     }

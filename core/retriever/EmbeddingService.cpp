@@ -85,6 +85,62 @@ ChatUsage parseUsage(const QJsonObject &usage)
     return result;
 }
 
+/// 把 NetworkTransport 的失败分类折叠成结构化错误码，供中文原因映射使用
+ChatError::Code codeForFailure(int httpStatus, NetworkTransport::Failure failure)
+{
+    switch (failure) {
+    case NetworkTransport::Failure::Cancelled:
+        return ChatError::Cancelled;
+    case NetworkTransport::Failure::Timeout:
+        return ChatError::Timeout;
+    case NetworkTransport::Failure::NetworkUnavailable:
+        return ChatError::NetworkUnavailable;
+    case NetworkTransport::Failure::Other:
+        break;
+    }
+    if (httpStatus == 401 || httpStatus == 403)
+        return ChatError::Unauthorized;
+    if (httpStatus == 429)
+        return ChatError::RateLimited;
+    if (httpStatus >= 500)
+        return ChatError::ServerError;
+    if (httpStatus > 0)
+        return ChatError::HttpError;
+    return ChatError::Unknown;
+}
+
+/// `GET /models` 失败原因：必须比「拉取失败」更具体，且不包含响应正文
+QString modelFetchReason(int httpStatus, NetworkTransport::Failure failure)
+{
+    if (httpStatus == 401 || httpStatus == 403)
+        return QStringLiteral("密钥无效或无权限");
+    if (httpStatus == 404)
+        return QStringLiteral("该服务未提供 /models 接口");
+    if (httpStatus == 429)
+        return QStringLiteral("触发限流，请稍后重试");
+    if (failure == NetworkTransport::Failure::Timeout
+        || failure == NetworkTransport::Failure::NetworkUnavailable
+        || httpStatus >= 500 || httpStatus <= 0) {
+        return QStringLiteral("无法判定，请检查网络或稍后重试");
+    }
+    return QStringLiteral("拉取失败（HTTP %1）").arg(httpStatus);
+}
+
+QStringList parseModelIds(const QByteArray &body)
+{
+    QStringList ids;
+    const QJsonDocument document = QJsonDocument::fromJson(body);
+    if (!document.isObject())
+        return ids;
+    const QJsonArray data = document.object().value(QStringLiteral("data")).toArray();
+    for (const QJsonValue &value : data) {
+        const QString id = value.toObject().value(QStringLiteral("id")).toString().trimmed();
+        if (!id.isEmpty() && !ids.contains(id))
+            ids.append(id);
+    }
+    return ids;
+}
+
 }  // namespace
 
 EmbeddingService::EmbeddingService(NetworkTransport *transport, QObject *parent)
@@ -95,6 +151,10 @@ EmbeddingService::EmbeddingService(NetworkTransport *transport, QObject *parent)
     connect(m_transport, &NetworkTransport::chunkReceived, this, [this](int handle, const QByteArray &chunk) {
         if (handle == m_handle) {
             m_body.append(chunk);
+        } else if (handle == m_validationHandle) {
+            m_validationBody.append(chunk);
+        } else if (handle == m_modelsHandle) {
+            m_modelsBody.append(chunk);
         }
     });
     connect(m_transport, &NetworkTransport::finished, this,
@@ -228,6 +288,18 @@ void EmbeddingService::issueNextBatch()
 
 void EmbeddingService::handleFinished(int handle)
 {
+    if (handle == m_validationHandle) {
+        m_validationHandle = 0;
+        finishValidationSuccess(m_validationBody);
+        m_validationBody.clear();
+        return;
+    }
+    if (handle == m_modelsHandle) {
+        m_modelsHandle = 0;
+        finishModelsFetch(m_modelsBody);
+        m_modelsBody.clear();
+        return;
+    }
     if (!m_busy || handle != m_handle) {
         return;
     }
@@ -257,6 +329,18 @@ void EmbeddingService::handleFinished(int handle)
 void EmbeddingService::handleFailed(int handle, int httpStatus,
                                     NetworkTransport::Failure failure, const QString &errorText)
 {
+    if (handle == m_validationHandle) {
+        m_validationHandle = 0;
+        m_validationBody.clear();
+        failValidation(httpStatus, failure);
+        return;
+    }
+    if (handle == m_modelsHandle) {
+        m_modelsHandle = 0;
+        m_modelsBody.clear();
+        failModelsFetch(httpStatus, failure);
+        return;
+    }
     if (!m_busy || handle != m_handle) {
         return;
     }
@@ -307,6 +391,186 @@ void EmbeddingService::handleFailed(int handle, int httpStatus,
         break;
     }
     fail(error);
+}
+
+void EmbeddingService::validateConfig()
+{
+    // 校验期间禁止重复发起
+    if (m_validationStatus == Checking)
+        return;
+
+    const QString reason = notReadyReason(m_provider, m_embedding);
+    if (!reason.isEmpty()) {
+        setValidation(Invalid, reason);
+        return;
+    }
+
+    if (m_validationHandle != 0) {
+        m_transport->abort(m_validationHandle);
+        m_validationHandle = 0;
+    }
+
+    QJsonObject body;
+    body.insert(QStringLiteral("model"), m_embedding.modelId);
+    QJsonArray input;
+    input.append(QStringLiteral("ping"));
+    body.insert(QStringLiteral("input"), input);
+    if (m_embedding.dimensions > 0)
+        body.insert(QStringLiteral("dimensions"), m_embedding.dimensions);
+
+    NetworkTransport::Request request;
+    request.url = ProviderUtils::endpointUrl(m_provider, AiProvider::Protocol::OpenAI,
+                                              QStringLiteral("/embeddings"));
+    request.method = QStringLiteral("POST");
+    request.headers = ProviderUtils::requestHeaders(m_provider, false);
+    request.body = QJsonDocument(body).toJson(QJsonDocument::Compact);
+    request.timeoutMs = 20000;
+
+    m_validationBody.clear();
+    setValidation(Checking, QStringLiteral("正在校验 embedding 服务"));
+    m_validationHandle = m_transport->post(request);
+    if (m_validationHandle == 0)
+        setValidation(Unverifiable, QStringLiteral("无法发起校验请求"));
+}
+
+void EmbeddingService::resetValidation()
+{
+    if (m_validationHandle != 0) {
+        m_transport->abort(m_validationHandle);
+        m_validationHandle = 0;
+        m_validationBody.clear();
+    }
+    setValidation(Idle, QString());
+}
+
+QString EmbeddingService::validationStatus() const
+{
+    switch (m_validationStatus) {
+    case Idle:
+        return QStringLiteral("idle");
+    case Checking:
+        return QStringLiteral("checking");
+    case Valid:
+        return QStringLiteral("valid");
+    case Invalid:
+        return QStringLiteral("invalid");
+    case Unverifiable:
+        return QStringLiteral("unverifiable");
+    }
+    return QStringLiteral("idle");
+}
+
+QString EmbeddingService::validationMessage() const
+{
+    return m_validationMessage;
+}
+
+void EmbeddingService::setValidation(ValidationStatus status, const QString &message)
+{
+    if (m_validationStatus == status && m_validationMessage == message)
+        return;
+    m_validationStatus = status;
+    m_validationMessage = message;
+    emit validationChanged();
+}
+
+void EmbeddingService::finishValidationSuccess(const QByteArray &body)
+{
+    if (m_validationStatus != Checking)
+        return;
+
+    QJsonParseError parseError;
+    const QJsonDocument document = QJsonDocument::fromJson(body, &parseError);
+    if (parseError.error != QJsonParseError::NoError || !document.isObject()) {
+        setValidation(Invalid, QStringLiteral("返回内容不是有效向量"));
+        return;
+    }
+
+    const QJsonObject object = document.object();
+    if (object.contains(QStringLiteral("error"))) {
+        setValidation(Invalid, QStringLiteral("服务端返回错误，请检查模型与地址"));
+        return;
+    }
+
+    const QJsonArray data = object.value(QStringLiteral("data")).toArray();
+    if (data.isEmpty()) {
+        setValidation(Invalid, QStringLiteral("返回内容不是有效向量"));
+        return;
+    }
+    const QJsonArray values = data.first().toObject().value(QStringLiteral("embedding")).toArray();
+    if (values.isEmpty()) {
+        setValidation(Invalid, QStringLiteral("返回内容不是有效向量"));
+        return;
+    }
+    if (m_embedding.dimensions > 0 && values.size() != m_embedding.dimensions) {
+        setValidation(Invalid, QStringLiteral("返回维度与配置不一致"));
+        return;
+    }
+
+    setValidation(Valid, QStringLiteral("校验通过：向量维度 %1").arg(values.size()));
+}
+
+void EmbeddingService::failValidation(int httpStatus, NetworkTransport::Failure failure)
+{
+    if (m_validationStatus != Checking)
+        return;
+
+    const ChatError::Code code = codeForFailure(httpStatus, failure);
+    // 429 / 超时 / 断网 / 5xx 只能判定为「无法判定」，不能误报配置无效
+    const bool unverifiable = code == ChatError::RateLimited || code == ChatError::Timeout
+                              || code == ChatError::NetworkUnavailable
+                              || code == ChatError::ServerError || code == ChatError::Cancelled
+                              || code == ChatError::Unknown;
+    setValidation(unverifiable ? Unverifiable : Invalid,
+                  validationFailureReason(httpStatus, code));
+}
+
+void EmbeddingService::fetchModels()
+{
+    if (m_provider.providerId.trimmed() == QStringLiteral("anthropic")) {
+        emit modelsFetched(QStringList(),
+                           QStringLiteral("Anthropic 未提供 embedding 接口，请单独配置一个支持 /embeddings 的服务"));
+        return;
+    }
+    if (m_provider.apiKey.trimmed().isEmpty()) {
+        emit modelsFetched(QStringList(), QStringLiteral("未配置 API Key"));
+        return;
+    }
+    if (m_provider.baseUrl.trimmed().isEmpty()) {
+        emit modelsFetched(QStringList(), QStringLiteral("未填写服务地址"));
+        return;
+    }
+    if (m_modelsHandle != 0) {
+        m_transport->abort(m_modelsHandle);
+        m_modelsHandle = 0;
+    }
+
+    NetworkTransport::Request request;
+    request.url = ProviderUtils::endpointUrl(m_provider, AiProvider::Protocol::OpenAI,
+                                              QStringLiteral("/models"));
+    request.method = QStringLiteral("GET");
+    request.headers = ProviderUtils::requestHeaders(m_provider, false);
+    request.timeoutMs = 20000;
+
+    m_modelsBody.clear();
+    m_modelsHandle = m_transport->get(request);
+    if (m_modelsHandle == 0)
+        emit modelsFetched(QStringList(), QStringLiteral("无法发起拉取请求"));
+}
+
+void EmbeddingService::finishModelsFetch(const QByteArray &body)
+{
+    const QStringList ids = parseModelIds(body);
+    if (ids.isEmpty()) {
+        emit modelsFetched(QStringList(), QStringLiteral("未能从厂商接口解析出模型清单"));
+        return;
+    }
+    emit modelsFetched(ids, QString());
+}
+
+void EmbeddingService::failModelsFetch(int httpStatus, NetworkTransport::Failure failure)
+{
+    emit modelsFetched(QStringList(), modelFetchReason(httpStatus, failure));
 }
 
 bool EmbeddingService::parseBatch(const QByteArray &body, int expectedCount, QString *error)

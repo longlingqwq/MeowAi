@@ -20,6 +20,7 @@ class TstLibraryConfig : public QObject
 private slots:
     void defaultsWhenFileMissing();
     void roundTripPersistsAllFields();
+    void legacyConfigWithoutBaseUrlFallsBackEmpty();
     void otherSectionsArePreserved();
     void corruptedFileFallsBackAndRebuilds();
     void emptyPathSaveFails();
@@ -103,10 +104,12 @@ void TstLibraryConfig::roundTripPersistsAllFields()
     data.chunkOverlap = 150;
     data.embedding.providerId = QStringLiteral("qwen");
     data.embedding.modelId = QStringLiteral("text-embedding-v4");
+    data.embedding.baseUrl = QStringLiteral("https://embed.example.com/v1");
     data.embedding.dimensions = 1024;
     data.embedding.batchSize = 10;
     data.caption.providerId = QStringLiteral("zhipu");
     data.caption.modelId = QStringLiteral("glm-4v-plus-0111");
+    data.caption.baseUrl = QStringLiteral("https://vision.example.com/v1");
     data.caption.maxEdge = 1024;
     data.caption.maxTokens = 400;
     data.caption.promptProfile = QStringLiteral("text-heavy");
@@ -130,14 +133,46 @@ void TstLibraryConfig::roundTripPersistsAllFields()
     QCOMPARE(loaded.chunkOverlap, 150);
     QCOMPARE(loaded.embedding.providerId, QStringLiteral("qwen"));
     QCOMPARE(loaded.embedding.modelId, QStringLiteral("text-embedding-v4"));
+    QCOMPARE(loaded.embedding.baseUrl, QStringLiteral("https://embed.example.com/v1"));
     QCOMPARE(loaded.embedding.dimensions, 1024);
     QCOMPARE(loaded.embedding.batchSize, 10);
     QCOMPARE(loaded.caption.providerId, QStringLiteral("zhipu"));
     QCOMPARE(loaded.caption.modelId, QStringLiteral("glm-4v-plus-0111"));
+    QCOMPARE(loaded.caption.baseUrl, QStringLiteral("https://vision.example.com/v1"));
     QCOMPARE(loaded.caption.maxEdge, 1024);
     QCOMPARE(loaded.caption.maxTokens, 400);
     QCOMPARE(loaded.caption.promptProfile, QStringLiteral("text-heavy"));
     QCOMPARE(loaded.mountedCollections, QList<qint64>({ 3, 7 }));
+}
+
+void TstLibraryConfig::legacyConfigWithoutBaseUrlFallsBackEmpty()
+{
+    QTemporaryDir tmp;
+    QVERIFY(tmp.isValid());
+
+    const QString path = configPath(tmp);
+    // 模拟升级前的 config.json：embedding/caption 均无 baseUrl 字段
+    QJsonObject library;
+    QJsonObject embedding;
+    embedding.insert(QStringLiteral("providerId"), QStringLiteral("qwen"));
+    embedding.insert(QStringLiteral("modelId"), QStringLiteral("text-embedding-v4"));
+    embedding.insert(QStringLiteral("dimensions"), 1024);
+    QJsonObject caption;
+    caption.insert(QStringLiteral("providerId"), QStringLiteral("zhipu"));
+    caption.insert(QStringLiteral("modelId"), QStringLiteral("glm-4v-plus-0111"));
+    library.insert(QStringLiteral("embedding"), embedding);
+    library.insert(QStringLiteral("caption"), caption);
+    QJsonObject root;
+    root.insert(QStringLiteral("library"), library);
+    QVERIFY(writeText(path, QJsonDocument(root).toJson()));
+
+    const LibraryConfigStore store(path);
+    QString error;
+    const LibraryConfigData data = store.load(&error);
+    QVERIFY(error.isEmpty());
+    QVERIFY(data.embedding.baseUrl.isEmpty());
+    QVERIFY(data.caption.baseUrl.isEmpty());
+    QCOMPARE(data.embedding.dimensions, 1024);
 }
 
 void TstLibraryConfig::otherSectionsArePreserved()

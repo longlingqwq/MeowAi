@@ -289,8 +289,23 @@ void OpenAiProvider::fetchModels()
         emit modelsFetched(QStringList(), QStringLiteral("该厂商不支持动态拉取模型清单"));
         return;
     }
+    requestModels();
+}
+
+void OpenAiProvider::fetchModelsForService()
+{
+    // 资料库场景不依赖 catalog 的静态判断：一律尝试 /models，由响应决定是否可用
+    requestModels();
+}
+
+void OpenAiProvider::requestModels()
+{
     if (!isConfigured()) {
         emit modelsFetched(QStringList(), QStringLiteral("未配置 API Key"));
+        return;
+    }
+    if (m_config.baseUrl.trimmed().isEmpty()) {
+        emit modelsFetched(QStringList(), QStringLiteral("未配置 API 地址"));
         return;
     }
     if (m_modelsHandle != 0) {
@@ -556,7 +571,22 @@ void OpenAiProvider::handleFailed(int handle, int httpStatus, NetworkTransport::
     }
     if (handle == m_modelsHandle) {
         m_modelsHandle = 0;
-        emit modelsFetched(QStringList(), QStringLiteral("拉取失败，已保留内置清单"));
+        ChatError::Code code = ChatError::HttpError;
+        if (failure == NetworkTransport::Failure::Timeout)
+            code = ChatError::Timeout;
+        else if (failure == NetworkTransport::Failure::NetworkUnavailable)
+            code = ChatError::NetworkUnavailable;
+        else if (httpStatus >= 500)
+            code = ChatError::ServerError;
+        else if (httpStatus == 401 || httpStatus == 403)
+            code = ChatError::Unauthorized;
+        else if (httpStatus == 429)
+            code = ChatError::RateLimited;
+        // 模型清单失败必须给出可执行的原因，不能只说「拉取失败」
+        const QString reason = httpStatus == 404
+                                   ? QStringLiteral("该服务未提供 /models 接口")
+                                   : validationFailureReason(httpStatus, code);
+        emit modelsFetched(QStringList(), reason);
         return;
     }
     if (handle != m_handle)

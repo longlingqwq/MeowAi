@@ -108,6 +108,10 @@ void LibraryController::loadState()
                 [this](const EmbeddingResult &) { emit embeddingChanged(); });
         connect(m_embedding, &EmbeddingService::failed, this,
                 [this](const ChatError &) { emit embeddingChanged(); });
+        connect(m_embedding, &EmbeddingService::validationChanged, this,
+                &LibraryController::embeddingValidationChanged);
+        connect(m_embedding, &EmbeddingService::modelsFetched, this,
+                &LibraryController::embeddingModelsFetched);
     }
     applyEmbeddingConfig();
     rebuildCaptionService();
@@ -249,8 +253,10 @@ QString LibraryController::embeddingStatus() const
         return QStringLiteral("缺少 API Key（可直接复用对话厂商的 Key，或在下方单独填写）");
     if (m_catalog) {
         const CatalogProvider provider = m_catalog->provider(m_config.embedding.providerId);
-        if (provider.customizable && (!m_aiConfig || m_aiConfig->load().customBaseUrl.trimmed().isEmpty()))
-            return QStringLiteral("自定义厂商缺少 API 地址（在「AI 接入」中填写）");
+        if (provider.customizable && m_config.embedding.baseUrl.trimmed().isEmpty()
+            && (!m_aiConfig || m_aiConfig->load().customBaseUrl.trimmed().isEmpty())) {
+            return QStringLiteral("自定义厂商缺少 API 地址（在下方填写本服务地址，或在「AI 接入」中填写）");
+        }
     }
     if (!m_config.consentGiven)
         return QStringLiteral("配置就绪，需先同意内容外发才会建立向量");
@@ -279,10 +285,53 @@ QString LibraryController::captionStatus() const
         return QStringLiteral("未配置：图片会保持「待索引」，不影响其它格式");
     if (!hasCaptionKey())
         return QStringLiteral("缺少 API Key（可直接复用对话厂商的 Key，或单独填写）");
+    if (m_catalog) {
+        const CatalogProvider provider = m_catalog->provider(m_config.caption.providerId);
+        if (provider.customizable && m_config.caption.baseUrl.trimmed().isEmpty()
+            && (!m_aiConfig || m_aiConfig->load().customBaseUrl.trimmed().isEmpty())) {
+            return QStringLiteral("自定义厂商缺少 API 地址（在下方填写本服务地址，或在「AI 接入」中填写）");
+        }
+    }
     if (!m_config.consentGiven)
         return QStringLiteral("配置就绪，需先同意图片外发");
     return m_caption && m_caption->isReady() ? QStringLiteral("就绪")
                                              : QStringLiteral("配置不完整");
+}
+
+QString LibraryController::embeddingValidationStatus() const
+{
+    return m_embedding ? m_embedding->validationStatus() : QStringLiteral("idle");
+}
+
+QString LibraryController::embeddingValidationMessage() const
+{
+    return m_embedding ? m_embedding->validationMessage() : QString();
+}
+
+QString LibraryController::captionValidationStatus() const
+{
+    if (m_caption)
+        return m_caption->validationStatus();
+    return m_captionValidationFallbackStatus.isEmpty()
+               ? QStringLiteral("idle")
+               : m_captionValidationFallbackStatus;
+}
+
+QString LibraryController::captionValidationMessage() const
+{
+    if (m_caption)
+        return m_caption->validationMessage();
+    return m_captionValidationFallbackMessage;
+}
+
+QString LibraryController::effectiveEmbeddingBaseUrl() const
+{
+    return resolveBaseUrl(m_config.embedding.providerId, m_config.embedding.baseUrl);
+}
+
+QString LibraryController::effectiveCaptionBaseUrl() const
+{
+    return resolveBaseUrl(m_config.caption.providerId, m_config.caption.baseUrl);
 }
 
 QVariantMap LibraryController::estimate() const
@@ -834,7 +883,7 @@ QString LibraryController::suggestedCaptionModel(const QString &providerId) cons
 }
 
 bool LibraryController::saveEmbeddingConfig(const QString &providerId, const QString &modelId,
-                                            int dimensions)
+                                            int dimensions, const QString &baseUrl)
 {
     const QString trimmedProvider = providerId.trimmed();
     QString trimmedModel = modelId.trimmed();
@@ -843,18 +892,36 @@ bool LibraryController::saveEmbeddingConfig(const QString &providerId, const QSt
 
     m_config.embedding.providerId = trimmedProvider;
     m_config.embedding.modelId = trimmedModel;
+    // 空串=保留原值（3 参旧调用不覆盖自定义地址）；清空显式走 clearEmbeddingBaseUrl()
+    if (!baseUrl.trimmed().isEmpty())
+        m_config.embedding.baseUrl = baseUrl.trimmed();
     if (dimensions <= 0 && m_catalog)
         dimensions = m_catalog->provider(trimmedProvider).embedding.model(trimmedModel).dimensions;
     m_config.embedding.dimensions = std::max(0, dimensions);
 
     persist();
     applyEmbeddingConfig();
+    if (m_embedding)
+        m_embedding->resetValidation();
     refreshEstimate();
     emit embeddingChanged();
     setMessage(trimmedModel.isEmpty()
                    ? QStringLiteral("已保存 embedding 厂商，请补全模型名")
                    : QStringLiteral("embedding 配置已保存：%1 / %2（旧向量需重建）")
                          .arg(trimmedProvider, trimmedModel));
+    return true;
+}
+
+bool LibraryController::clearEmbeddingBaseUrl()
+{
+    if (m_config.embedding.baseUrl.isEmpty())
+        return true;
+    m_config.embedding.baseUrl.clear();
+    persist();
+    applyEmbeddingConfig();
+    if (m_embedding)
+        m_embedding->resetValidation();
+    emit embeddingChanged();
     return true;
 }
 
@@ -878,7 +945,8 @@ bool LibraryController::saveEmbeddingKey(const QString &apiKey)
     return true;
 }
 
-bool LibraryController::saveCaptionConfig(const QString &providerId, const QString &modelId)
+bool LibraryController::saveCaptionConfig(const QString &providerId, const QString &modelId,
+                                          const QString &baseUrl)
 {
     const QString trimmedProvider = providerId.trimmed();
     QString trimmedModel = modelId.trimmed();
@@ -887,6 +955,9 @@ bool LibraryController::saveCaptionConfig(const QString &providerId, const QStri
 
     m_config.caption.providerId = trimmedProvider;
     m_config.caption.modelId = trimmedModel;
+    // 空串=保留原值；清空显式走 clearCaptionBaseUrl()
+    if (!baseUrl.trimmed().isEmpty())
+        m_config.caption.baseUrl = baseUrl.trimmed();
     persist();
     rebuildCaptionService();
     refreshEstimate();
@@ -895,6 +966,17 @@ bool LibraryController::saveCaptionConfig(const QString &providerId, const QStri
                    ? QStringLiteral("已保存图片描述厂商，请补全模型名")
                    : QStringLiteral("图片描述配置已保存：%1 / %2")
                          .arg(trimmedProvider, trimmedModel));
+    return true;
+}
+
+bool LibraryController::clearCaptionBaseUrl()
+{
+    if (m_config.caption.baseUrl.isEmpty())
+        return true;
+    m_config.caption.baseUrl.clear();
+    persist();
+    rebuildCaptionService();
+    emit captionChanged();
     return true;
 }
 
@@ -940,6 +1022,63 @@ bool LibraryController::hasCaptionKey() const
             QStringLiteral("library.caption.%1.api_key").arg(m_config.caption.providerId)))
         return true;
     return m_secure->has(SecureStore::providerApiKeyId(m_config.caption.providerId));
+}
+
+void LibraryController::validateEmbeddingConfig()
+{
+    if (!m_embedding) {
+        emit embeddingValidationChanged();
+        return;
+    }
+    // 只在索引空闲时重配；索引进行中也允许校验当前已生效配置，但不打断索引
+    if (!m_embedding->busy())
+        applyEmbeddingConfig();
+    m_embedding->validateConfig();
+}
+
+void LibraryController::validateCaptionConfig()
+{
+    m_captionValidationFallbackStatus.clear();
+    m_captionValidationFallbackMessage.clear();
+    if (m_caption) {
+        m_caption->validateConfig();
+        return;
+    }
+
+    m_captionValidationFallbackStatus = QStringLiteral("invalid");
+    m_captionValidationFallbackMessage =
+        QStringLiteral("尚未配置可用于图片描述的视觉模型");
+    emit captionValidationChanged();
+}
+
+void LibraryController::fetchEmbeddingModels()
+{
+    if (!m_embedding) {
+        emit embeddingModelsFetched(QStringList(),
+                                    QStringLiteral("尚未配置 embedding 服务"));
+        return;
+    }
+    if (m_embedding->busy()) {
+        emit embeddingModelsFetched(QStringList(),
+                                    QStringLiteral("正在向量化，请稍后拉取模型"));
+        return;
+    }
+    // 用当前生效配置拉取（含地址优先级），不修改任何已保存字段
+    applyEmbeddingConfig();
+    m_embedding->fetchModels();
+}
+
+void LibraryController::fetchCaptionModels()
+{
+    if (!m_captionProvider) {
+        emit captionModelsFetched(QStringList(),
+                                  QStringLiteral("尚未配置可用于图片描述的视觉模型"));
+        return;
+    }
+    if (m_captionModelsFetching)
+        return;
+    m_captionModelsFetching = true;
+    m_captionProvider->fetchModelsForService();
 }
 
 void LibraryController::search(const QString &query)
@@ -1167,7 +1306,9 @@ void LibraryController::applyEmbeddingConfig()
     }
 
     m_embedding->configure(
-        buildProviderConfig(m_config.embedding.providerId, QStringLiteral("library.embedding.")),
+        buildProviderConfig(m_config.embedding.providerId,
+                            QStringLiteral("library.embedding."),
+                            m_config.embedding.baseUrl),
         embeddingConfig);
     if (m_retriever)
         m_retriever->setEmbeddingModel(m_config.embedding.providerId, m_config.embedding.modelId);
@@ -1179,10 +1320,14 @@ void LibraryController::rebuildCaptionService()
     m_indexer->setCaptionService(nullptr);
     m_caption.reset();
     m_captionProvider.reset();
+    m_captionModelsFetching = false;
+    m_captionValidationFallbackStatus.clear();
+    m_captionValidationFallbackMessage.clear();
     if (!m_catalog || m_config.caption.providerId.isEmpty()
         || m_config.caption.modelId.isEmpty()) {
         m_indexer->setCaptionService(nullptr);
         emit captionChanged();
+        emit captionValidationChanged();
         return;
     }
 
@@ -1194,22 +1339,58 @@ void LibraryController::rebuildCaptionService()
     if (!m_captionProvider) {
         m_indexer->setCaptionService(nullptr);
         emit captionChanged();
+        emit captionValidationChanged();
         return;
     }
     ProviderConfig config =
-        buildProviderConfig(m_config.caption.providerId, QStringLiteral("library.caption."));
+        buildProviderConfig(m_config.caption.providerId,
+                            QStringLiteral("library.caption."),
+                            m_config.caption.baseUrl);
     config.model = m_config.caption.modelId;
     m_captionProvider->configure(config);
 
     m_caption = std::make_unique<ImageCaptionService>(m_captionProvider.get());
     m_caption->setCaptionConfig(m_config.caption);
     m_caption->setConsentGiven(m_config.consentGiven);
+    connect(m_caption.get(), &ImageCaptionService::validationChanged, this,
+            &LibraryController::captionValidationChanged);
+    connect(m_captionProvider.get(), &AiProvider::modelsFetched, this,
+            [this](const QStringList &ids, const QString &error) {
+                m_captionModelsFetching = false;
+                emit captionModelsFetched(ids, error);
+            });
     m_indexer->setCaptionService(m_caption.get());
     emit captionChanged();
+    emit captionValidationChanged();
+}
+
+QString LibraryController::resolveBaseUrl(const QString &providerId,
+                                          const QString &serviceBaseUrl) const
+{
+    // 1) 本服务显式填写的地址最优先
+    const QString explicitUrl = serviceBaseUrl.trimmed();
+    if (!explicitUrl.isEmpty())
+        return explicitUrl;
+
+    // 2) 仅当与对话厂商相同、且本服务未填地址时，复用对话的自定义地址
+    if (m_aiConfig) {
+        const AiConfigData data = m_aiConfig->load();
+        const QString custom = data.customBaseUrl.trimmed();
+        if (!custom.isEmpty()
+            && data.providerId.trimmed().compare(providerId.trimmed(), Qt::CaseInsensitive) == 0) {
+            return custom;
+        }
+    }
+
+    // 3) catalog 默认地址
+    if (m_catalog && !providerId.isEmpty())
+        return m_catalog->provider(providerId).baseUrl;
+    return QString();
 }
 
 ProviderConfig LibraryController::buildProviderConfig(const QString &providerId,
-                                                      const QString &keyPrefix) const
+                                                      const QString &keyPrefix,
+                                                      const QString &serviceBaseUrl) const
 {
     ProviderConfig config;
     config.providerId = providerId;
@@ -1217,14 +1398,9 @@ ProviderConfig LibraryController::buildProviderConfig(const QString &providerId,
         return config;
 
     const CatalogProvider provider = m_catalog->provider(providerId);
-    config.baseUrl = provider.baseUrl;
+    config.baseUrl = resolveBaseUrl(providerId, serviceBaseUrl);
     config.authStyle = provider.authStyle;
     config.extraHeaders = provider.extraHeaders;
-    if (provider.customizable && m_aiConfig) {
-        const AiConfigData data = m_aiConfig->load();
-        if (!data.customBaseUrl.trimmed().isEmpty())
-            config.baseUrl = data.customBaseUrl;
-    }
     if (m_secure) {
         QString key;
         if (m_secure->load(keyPrefix + providerId + QStringLiteral(".api_key"), &key, nullptr)

@@ -88,6 +88,14 @@ QVariant ChatHistoryModel::data(const QModelIndex &index, int role) const
         return row.status;
     case CreatedAtRole:
         return row.createdAt;
+    case TotalTokensRole:
+        return row.totalTokens;
+    case PromptTokensRole:
+        return row.promptTokens;
+    case CompletionTokensRole:
+        return row.completionTokens;
+    case ElapsedMsRole:
+        return row.elapsedMs;
     default:
         return QVariant();
     }
@@ -101,6 +109,10 @@ QHash<int, QByteArray> ChatHistoryModel::roleNames() const
         { MessageIdRole, "messageId" },
         { StatusRole, "status" },
         { CreatedAtRole, "createdAt" },
+        { TotalTokensRole, "totalTokens" },
+        { PromptTokensRole, "promptTokens" },
+        { CompletionTokensRole, "completionTokens" },
+        { ElapsedMsRole, "elapsedMs" },
     };
 }
 
@@ -353,7 +365,8 @@ void ChatHistoryModel::appendAssistantDelta(const QString &delta)
     }
 }
 
-void ChatHistoryModel::finalizeAssistantMessage(const QString &status, const QString &finalText)
+void ChatHistoryModel::finalizeAssistantMessage(const QString &status, const QString &finalText,
+                                                const ChatUsage &usage, qint64 elapsedMs)
 {
     m_flushTimer.stop();
 
@@ -373,11 +386,21 @@ void ChatHistoryModel::finalizeAssistantMessage(const QString &status, const QSt
         row.content = finalText;
     }
     row.status = status;
+    row.totalTokens = usage.totalTokens;
+    row.promptTokens = usage.promptTokens;
+    row.completionTokens = usage.completionTokens;
+    row.elapsedMs = elapsedMs;
 
     if (available() && row.id != 0) {
         QString error;
         if (!m_store->updateMessage(row.id, row.content, row.status, &error)) {
             setLastError(error);
+        }
+        // usage 与耗时单独更新：流式节流写从不触碰这两列，避免中间态覆盖终值
+        QString usageError;
+        if (!m_store->updateMessageUsage(row.id, row.totalTokens, row.promptTokens,
+                                         row.completionTokens, row.elapsedMs, &usageError)) {
+            setLastError(usageError);
         }
         QString touchError;
         if (!m_store->touchConversation(m_conversationId, &touchError)) {
@@ -387,8 +410,51 @@ void ChatHistoryModel::finalizeAssistantMessage(const QString &status, const QSt
     m_pendingMessageId = 0;
 
     const QModelIndex idx = index(lastIndex, 0);
-    emit dataChanged(idx, idx, { ContentRole, StatusRole });
+    emit dataChanged(idx, idx, { ContentRole, StatusRole, TotalTokensRole, PromptTokensRole,
+                                CompletionTokensRole, ElapsedMsRole });
     refreshConversations();
+}
+
+QString ChatHistoryModel::lastUserMessageText() const
+{
+    for (int i = m_rows.size() - 1; i >= 0; --i) {
+        const Row &row = m_rows.at(i);
+        if (row.role == QLatin1String("user") && !row.content.trimmed().isEmpty())
+            return row.content;
+    }
+    return QString();
+}
+
+void ChatHistoryModel::removeLastAssistantMessage()
+{
+    // 先落掉节流中的内容，删除后不留下悬空写
+    if (m_pendingMessageId != 0) {
+        m_flushTimer.stop();
+        flushPending();
+    }
+
+    int target = -1;
+    for (int i = m_rows.size() - 1; i >= 0; --i) {
+        if (m_rows.at(i).role == QLatin1String("assistant")) {
+            target = i;
+            break;
+        }
+    }
+    if (target < 0)
+        return;
+
+    const qint64 messageId = m_rows.at(target).id;
+    if (available() && messageId != 0) {
+        QString error;
+        if (!m_store->removeMessage(messageId, &error))
+            setLastError(error);
+    }
+    if (m_pendingMessageId == messageId)
+        m_pendingMessageId = 0;
+
+    beginRemoveRows(QModelIndex(), target, target);
+    m_rows.removeAt(target);
+    endRemoveRows();
 }
 
 QList<ChatMessage> ChatHistoryModel::requestHistory(int maxMessages, int maxChars) const
@@ -497,6 +563,10 @@ void ChatHistoryModel::loadRows(qint64 conversationId)
             row.content = record.content;
             row.status = record.status;
             row.createdAt = record.createdAt;
+            row.totalTokens = record.totalTokens;
+            row.promptTokens = record.promptTokens;
+            row.completionTokens = record.completionTokens;
+            row.elapsedMs = record.elapsedMs;
             m_rows.append(row);
         }
     }

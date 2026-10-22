@@ -6,6 +6,7 @@
 #include "providers/AiProvider.h"
 #include "storage/AiConfigStore.h"
 
+#include <QElapsedTimer>
 #include <QHash>
 #include <QJsonObject>
 #include <QObject>
@@ -191,6 +192,20 @@ public:
     Q_INVOKABLE void sendWithImage(const QString &text, const QString &imagePath);
     Q_INVOKABLE void cancel();
 
+    /**
+     * 用最后一条用户消息重新发起，删除最后一条助手消息（含错误消息）。
+     * 忙碌时直接忽略；不会重复写入用户消息。
+     */
+    Q_INVOKABLE void regenerateLast();
+
+    /**
+     * 把 Markdown 渲染为 QML `Text.RichText` 可用的 HTML。
+     *
+     * 使用 Qt 自带 `QTextDocumentFragment::fromMarkdown`，零新增依赖；
+     * 不执行脚本、不加载外部资源。空文本返回空串。
+     */
+    Q_INVOKABLE QString renderMarkdown(const QString &text) const;
+
 signals:
     void providerChanged();
     void modelChanged();
@@ -220,12 +235,13 @@ private:
     void setValidating(bool validating);
     void ensureProvider();
     /// 组装一轮请求：写入会话历史（可用时）、按有界上下文补全 messages，再交给 Provider
-    void dispatchUserMessage(const ChatMessage &userMessage);
+    /// recordUserMessage=false 用于「重新生成」：复用已落库的用户消息，不重复写入
+    void dispatchUserMessage(const ChatMessage &userMessage, bool recordUserMessage = true);
     /// 资料库检索完成后的续跑：装配请求并发送（libraryContext 为空则按普通对话）
     void continueDispatch(const ChatMessage &userMessage, const QString &apiKey,
-                          const QString &libraryContext);
+                          const QString &libraryContext, bool recordUserMessage = true);
     /// 发起资料库预检索（异步）；未挂载 / 未装配时不会进入此路径
-    void beginLibraryRetrieval(const ChatMessage &userMessage);
+    void beginLibraryRetrieval(const ChatMessage &userMessage, bool recordUserMessage = true);
     /// 检索前重新读取资料库配置：用户可能在本次会话里才配好 embedding
     void syncRetrievalConfig();
     void handleLibraryRetrievalFinished(const RetrievalResult &result);
@@ -324,6 +340,8 @@ private:
     /// 检索进行中：只在此时接受检索回调，避免迟到结果串到下一轮
     bool m_libraryRetrieving = false;
     ChatMessage m_pendingUserMessage;
+    /// 续跑时是否写入用户消息（重新生成=false，避免重复落库）
+    bool m_pendingRecordUserMessage = true;
     /// 上一轮检索结果（来源 chip / token 展示 / citations 落库共用）
     RetrievalResult m_lastRetrieval;
     /// 上一轮文件级注入明细（v0.2.6）：供 UI 展示每个文件的注入级别与降级原因
@@ -331,4 +349,6 @@ private:
     QString m_libraryStatus;
     /// 本轮 assistant 消息 id（citations 外键；会话不可持久化时为 0）
     qint64 m_pendingAssistantMessageId = 0;
+    /// 本轮耗时：从请求发出到结束（失败/重生成同样收尾）
+    QElapsedTimer m_roundTimer;
 };

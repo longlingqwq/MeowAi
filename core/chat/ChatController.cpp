@@ -18,6 +18,7 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QTextDocumentFragment>
 
 // BudgetCalculator 是纯静态 struct，直接 BudgetCalculator::calculate(...) 调用
 // estimateTokens 是 ChunkSplitter.h 里的全局函数（已 include）
@@ -169,8 +170,11 @@ QString ChatController::customBaseUrl() const
 
 bool ChatController::modelListFetchable() const
 {
-    return m_catalog
-        && m_catalog->provider(m_providerId).validationMethod == QStringLiteral("models");
+    if (!m_catalog)
+        return false;
+    // 自定义厂商没有 catalog 的静态声明：允许直接尝试 /models，失败仅提示、不影响对话
+    return m_catalog->provider(m_providerId).validationMethod == QStringLiteral("models")
+        || customizable();
 }
 
 QString ChatController::modelListMessage() const
@@ -274,7 +278,7 @@ QString ChatController::webSearchMessage() const
     bool supported = false;
     const WebSearchConfig config = effectiveSearchConfig(&supported, nullptr);
     if (!supported)
-        return QStringLiteral("当前厂商暂不支持智能联网；可在「联网搜索」里填写自定义搜索源");
+        return QStringLiteral("当前厂商暂不支持联网搜索；可在「联网搜索」里填写自定义搜索源");
     if (config.endpoint.trimmed().isEmpty())
         return QStringLiteral("联网搜索未配置：缺少搜索端点");
     if (config.apiKey.trimmed().isEmpty()) {
@@ -502,10 +506,13 @@ void ChatController::rebuildProvider()
         if (error.code != ChatError::Cancelled)
             setLastError(error.message);
         // 中断/失败都**保留已生成的部分内容**，只标记状态，不写坏数据
+        const qint64 elapsed = m_roundTimer.isValid() ? m_roundTimer.elapsed() : -1;
+        m_roundTimer.invalidate();
         if (m_history && m_history->available()) {
             m_history->finalizeAssistantMessage(error.code == ChatError::Cancelled
                                                     ? QStringLiteral("partial")
-                                                    : QStringLiteral("error"));
+                                                    : QStringLiteral("error"),
+                                                QString(), ChatUsage(), elapsed);
         }
         setBusy(false);
     });
@@ -734,10 +741,20 @@ void ChatController::fetchModelList()
         return;
     }
 
+    if (customizable() && m_config.customBaseUrl.trimmed().isEmpty()) {
+        m_modelListMessage = QStringLiteral("自定义厂商需要先填写 API 链接");
+        emit modelListChanged();
+        return;
+    }
+
     m_provider->configure(buildProviderConfig(apiKey));
     m_modelListMessage = QStringLiteral("正在拉取…");
     emit modelListChanged();
-    m_provider->fetchModels();
+    // 自定义厂商的 catalog 校验方式是 chat-minimal，必须走「无条件尝试 /models」的入口
+    if (customizable())
+        m_provider->fetchModelsForService();
+    else
+        m_provider->fetchModels();
 }
 
 void ChatController::send(const QString &text)
@@ -815,11 +832,11 @@ WebSearchConfig ChatController::effectiveSearchConfig(bool *supported, QString *
 
     // ③ 厂商不支持，且未填自定义源
     if (notice)
-        *notice = QStringLiteral("当前厂商暂不支持智能联网（可在「联网搜索」里填写自定义搜索源）");
+        *notice = QStringLiteral("当前厂商暂不支持联网搜索（可在「联网搜索」里填写自定义搜索源）");
     return config;
 }
 
-void ChatController::dispatchUserMessage(const ChatMessage &userMessage)
+void ChatController::dispatchUserMessage(const ChatMessage &userMessage, bool recordUserMessage)
 {
     if (m_busy) {
         setLastError(QStringLiteral("上一条请求尚未结束"));
@@ -846,15 +863,15 @@ void ChatController::dispatchUserMessage(const ChatMessage &userMessage)
 
     // 资料库（A 形态）：挂载小库时先做应用侧预检索，拿到片段后再装配请求
     if (m_retriever && !m_mountedCollectionIds.isEmpty()) {
-        beginLibraryRetrieval(userMessage);
+        beginLibraryRetrieval(userMessage, recordUserMessage);
         return;
     }
 
-    continueDispatch(userMessage, apiKey, QString());
+    continueDispatch(userMessage, apiKey, QString(), recordUserMessage);
 }
 
 void ChatController::continueDispatch(const ChatMessage &userMessage, const QString &apiKey,
-                                      const QString &libraryContext)
+                                      const QString &libraryContext, bool recordUserMessage)
 {
     ensureProvider();
     if (!m_provider) {
@@ -871,8 +888,10 @@ void ChatController::continueDispatch(const ChatMessage &userMessage, const QStr
     request.nativeParams = QJsonObject::fromVariantMap(effectiveParams());
 
     if (m_history && m_history->available()) {
-        // 写入会话历史，再按**有界上下文**取回（含刚写入的这条用户消息）
-        m_history->appendUserMessage(userMessage.text);
+        // 写入会话历史，再按**有界上下文**取回（含刚写入的这条用户消息）。
+        // 重新生成时用户消息已在库中，若再次写入会重复，因此按 recordUserMessage 跳过。
+        if (recordUserMessage)
+            m_history->appendUserMessage(userMessage.text);
         m_pendingAssistantMessageId = m_history->beginAssistantMessage();
         request.messages = m_history->requestHistory(kMaxHistoryMessages, kMaxHistoryChars);
         // 图片不落库，仅在本次请求末尾补上（是否真正上传仍由 imagesConfirmed 决定）
@@ -1092,9 +1111,10 @@ void ChatController::clearMountedCollections()
     persistMountedCollections();
 }
 
-void ChatController::beginLibraryRetrieval(const ChatMessage &userMessage)
+void ChatController::beginLibraryRetrieval(const ChatMessage &userMessage, bool recordUserMessage)
 {
     m_pendingUserMessage = userMessage;
+    m_pendingRecordUserMessage = recordUserMessage;
     m_libraryRetrieving = true;
     m_replyText.clear();
     emit replyTextChanged();
@@ -1200,7 +1220,8 @@ void ChatController::handleLibraryRetrievalFinished(const RetrievalResult &resul
     }
 
     continueDispatch(m_pendingUserMessage, apiKey,
-                     m_fileRetriever ? buildLibraryContext(injected) : buildLibraryContext(result));
+                     m_fileRetriever ? buildLibraryContext(injected) : buildLibraryContext(result),
+                     m_pendingRecordUserMessage);
 }
 
 void ChatController::handleLibraryRetrievalFailed(const ChatError &error)
@@ -1229,7 +1250,7 @@ void ChatController::handleLibraryRetrievalFailed(const ChatError &error)
                                          : QStringLiteral("读取 API Key 失败：%1").arg(loadError));
         return;
     }
-    continueDispatch(m_pendingUserMessage, apiKey, QString());
+    continueDispatch(m_pendingUserMessage, apiKey, QString(), m_pendingRecordUserMessage);
 }
 
 int ChatController::contextWindowForCurrentModel() const
@@ -1476,8 +1497,12 @@ void ChatController::finishAssistantRound(const ChatResponse &response)
         emit replyTextChanged();
     }
     // 以整包文本对齐流式累积结果，避免分片丢失导致内容不一致
-    if (m_history && m_history->available())
-        m_history->finalizeAssistantMessage(QStringLiteral("complete"), m_replyText);
+    const qint64 elapsed = m_roundTimer.isValid() ? m_roundTimer.elapsed() : -1;
+    m_roundTimer.invalidate();
+    if (m_history && m_history->available()) {
+        m_history->finalizeAssistantMessage(QStringLiteral("complete"), m_replyText,
+                                            response.usage, elapsed);
+    }
 
     // 来源落库：citations 关联到本轮 assistant 消息（落库失败不影响对话）
     persistCitations(m_pendingAssistantMessageId);
@@ -1528,6 +1553,9 @@ void ChatController::sendRequest(const ChatRequest &request)
     emit replyTextChanged();
     setLastError(QString());
     setBusy(true);
+    // 一轮从「首个请求发出」计时；工具循环的后续请求不重置，保证耗时覆盖整轮
+    if (!m_roundTimer.isValid())
+        m_roundTimer.start();
     m_provider->sendChat(effective);
 }
 
@@ -1563,6 +1591,39 @@ void ChatController::cancel()
     }
     if (m_provider && m_busy)
         m_provider->cancel();
+}
+
+void ChatController::regenerateLast()
+{
+    // 忙碌时忽略：不打断在途请求，也不留下半轮状态
+    if (m_busy || m_libraryRetrieving || m_searching)
+        return;
+    if (!m_history || !m_history->available()) {
+        setLastError(QStringLiteral("会话不可用，无法重新生成"));
+        return;
+    }
+
+    const QString text = m_history->lastUserMessageText();
+    if (text.trimmed().isEmpty()) {
+        setLastError(QStringLiteral("没有可重新生成的消息"));
+        return;
+    }
+
+    // 删除最后一条助手消息（含错误消息），再复用最后一条用户消息重发
+    m_history->removeLastAssistantMessage();
+
+    ChatMessage message;
+    message.role = ChatMessage::User;
+    message.text = text;
+    dispatchUserMessage(message, false);
+}
+
+QString ChatController::renderMarkdown(const QString &text) const
+{
+    if (text.trimmed().isEmpty())
+        return QString();
+    // Qt 自带 Markdown 导入器：不执行脚本、不加载外部资源，输出 RichText 可用 HTML
+    return QTextDocumentFragment::fromMarkdown(text).toHtml();
 }
 
 void ChatController::ensureProvider()

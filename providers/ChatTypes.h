@@ -161,3 +161,34 @@ Q_DECLARE_METATYPE(ChatResponse)
 Q_DECLARE_METATYPE(CredentialStatus)
 Q_DECLARE_METATYPE(ChatToolCall)
 Q_DECLARE_METATYPE(QList<ChatToolCall>)
+
+/**
+ * 配置校验失败的统一中文原因（资料库 embedding / caption 共用）。
+ *
+ * 只依据结构化错误码与 HTTP 状态映射，**不拼接服务端原文、不包含 Key 或请求体**。
+ * 429 / 超时 / 断网 / 5xx 属于「无法判定」，调用方必须据此给出 unverifiable，
+ * 不能误判成配置无效。
+ */
+inline QString validationFailureReason(int httpStatus, ChatError::Code code)
+{
+    if (code == ChatError::Unauthorized || httpStatus == 401 || httpStatus == 403) {
+        return QStringLiteral("密钥无效或无权限");
+    }
+    if (httpStatus == 404) {
+        return QStringLiteral("模型不存在或无此接口");
+    }
+    if (code == ChatError::RateLimited || httpStatus == 429) {
+        return QStringLiteral("触发限流，请稍后重试");
+    }
+    if (code == ChatError::Timeout || code == ChatError::NetworkUnavailable
+        || code == ChatError::ServerError || httpStatus >= 500) {
+        return QStringLiteral("无法判定，请检查网络或稍后重试");
+    }
+    if (code == ChatError::Cancelled) {
+        return QStringLiteral("校验已取消");
+    }
+    if (httpStatus > 0) {
+        return QStringLiteral("请求被拒绝（HTTP %1），请检查配置").arg(httpStatus);
+    }
+    return QStringLiteral("无法判定，请检查网络或稍后重试");
+}

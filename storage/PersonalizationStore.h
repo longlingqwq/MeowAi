@@ -19,7 +19,7 @@ struct PersonalizationConfig
     QString backgroundSource;       ///< 背景图相对路径；为空表示无自定义背景
     QString avatarSource;           ///< 头像相对路径；为空表示无自定义头像
     QString splashSource;           ///< 开屏视频相对路径；为空表示无自定义开屏
-    bool splashEnabled = false;     ///< 是否在启动时播放开屏视频
+    bool splashEnabled = true;      ///< 是否在启动时播放开屏（内置开屏默认开启）
     bool splashSoundEnabled = true; ///< 开屏视频是否播放音效（视频自带音轨）
 };
 

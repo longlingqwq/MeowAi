@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Effects
+import QtQuick.Window
 
 /**
  * 联网搜索（第三级弹层）：**默认不显眼**——从「模型与档位」二级菜单里的「配置…」进入。
@@ -15,15 +16,21 @@ import QtQuick.Effects
 Popup {
     id: panel
 
-    /// 在触发器下方弹出；下方放不下时自动翻到上方，并整体夹在窗口内
+    /// 在触发器下方弹出；下方放不下时自动翻到上方，并整体夹在窗口内。
+    /// 宿主固定为窗口根 Item：弹层挂在窗口层，不会被 Dock / 父容器的 clip 裁剪。
     function openAt(anchorItem, hostItem) {
-        panel.hostItem = hostItem
-        const point = anchorItem.mapToItem(hostItem, 0, anchorItem.height + 6)
-        const popupWidth = Math.min(panel.implicitWidth, hostItem.width - 16)
-        const popupHeight = Math.min(panel.implicitHeight, hostItem.height - 16)
-        x = Math.max(8, Math.min(point.x, hostItem.width - popupWidth - 8))
+        const host = hostItem ? hostItem
+                              : (anchorItem.Window.window ? anchorItem.Window.window.contentItem
+                                                          : anchorItem)
+        panel.hostItem = host
+        if (panel.parent !== host)
+            panel.parent = host
+        const point = anchorItem.mapToItem(host, 0, anchorItem.height + 6)
+        const popupWidth = Math.min(panel.implicitWidth, host.width - 16)
+        const popupHeight = Math.min(panel.implicitHeight, host.height - 16)
+        x = Math.max(8, Math.min(point.x, host.width - popupWidth - 8))
         let top = point.y
-        if (top + popupHeight > hostItem.height - 8)
+        if (top + popupHeight > host.height - 8)
             top = point.y - anchorItem.height - 12 - popupHeight
         y = Math.max(8, top)
         open()
@@ -128,7 +135,7 @@ Popup {
             spacing: Theme.s2
 
             MLabel {
-                label: qsTr("智能联网")
+                label: qsTr("联网搜索")
                 anchors.verticalCenter: parent.verticalCenter
             }
 

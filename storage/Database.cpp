@@ -17,7 +17,7 @@ void setError(QString *error, const QString &message)
     }
 }
 
-constexpr int kCurrentSchemaVersion = 3;
+constexpr int kCurrentSchemaVersion = 4;
 
 /// 读取 meta 中的 schema_version；无记录或非法值视为 0（全新库）
 int readSchemaVersion(const QSqlDatabase &db)
@@ -102,6 +102,36 @@ bool tableExists(const QSqlDatabase &db, const QString &name)
     query.prepare(QStringLiteral("SELECT 1 FROM sqlite_master WHERE name = ? LIMIT 1"));
     query.addBindValue(name);
     return query.exec() && query.next();
+}
+
+/// 表是否已有指定列（SQLite 的 ADD COLUMN 没有 IF NOT EXISTS，迁移必须自行判重）
+bool columnExists(const QSqlDatabase &db, const QString &table, const QString &column)
+{
+    QSqlQuery query(db);
+    if (!query.exec(QStringLiteral("PRAGMA table_info(%1)").arg(table)))
+        return false;
+    while (query.next()) {
+        if (query.value(1).toString().compare(column, Qt::CaseInsensitive) == 0)
+            return true;
+    }
+    return false;
+}
+
+/// 幂等补列：已存在则跳过；失败返回 false + error，不删除任何旧数据
+bool ensureColumn(const QSqlDatabase &db, const QString &table, const QString &column,
+                  const QString &definition, QString *error)
+{
+    if (columnExists(db, table, column))
+        return true;
+
+    QSqlQuery query(db);
+    if (!query.exec(QStringLiteral("ALTER TABLE %1 ADD COLUMN %2 %3")
+                        .arg(table, column, definition))) {
+        setError(error, QStringLiteral("数据库升级失败（%1.%2）：%3")
+                            .arg(table, column, query.lastError().text()));
+        return false;
+    }
+    return true;
 }
 
 /// 探测 FTS5 是否可用（Qt 自带的 SQLite 可能未编译 FTS5）。
@@ -406,6 +436,20 @@ bool Database::ensureSchema(QString *error)
     }
     if (version < 3) {
         if (!execStatements(db, schemaV3Statements(), error)) {
+            return false;
+        }
+    }
+    if (version < 4) {
+        // v4：消息 usage 与耗时。旧库自动补列；已存在则跳过（幂等）。
+        // 失败不崩溃、不删旧数据，只返回错误并由上层提示。
+        if (!ensureColumn(db, QStringLiteral("messages"), QStringLiteral("total_tokens"),
+                          QStringLiteral("INTEGER NOT NULL DEFAULT -1"), error)
+            || !ensureColumn(db, QStringLiteral("messages"), QStringLiteral("prompt_tokens"),
+                             QStringLiteral("INTEGER NOT NULL DEFAULT -1"), error)
+            || !ensureColumn(db, QStringLiteral("messages"), QStringLiteral("completion_tokens"),
+                             QStringLiteral("INTEGER NOT NULL DEFAULT -1"), error)
+            || !ensureColumn(db, QStringLiteral("messages"), QStringLiteral("elapsed_ms"),
+                             QStringLiteral("INTEGER NOT NULL DEFAULT -1"), error)) {
             return false;
         }
     }

@@ -135,12 +135,15 @@ LibraryConfigData LibraryConfigStore::load(QString *error) const
     const QJsonObject embedding = section.value(QLatin1String(kKeyEmbedding)).toObject();
     data.embedding.providerId = readString(embedding, QStringLiteral("providerId"));
     data.embedding.modelId = readString(embedding, QStringLiteral("modelId"));
+    // 旧配置无此字段时回退为空串（兼容历史 config.json）
+    data.embedding.baseUrl = readString(embedding, QStringLiteral("baseUrl")).trimmed();
     data.embedding.dimensions = readInt(embedding, QStringLiteral("dimensions"), data.embedding.dimensions);
     data.embedding.batchSize = readInt(embedding, QStringLiteral("batchSize"), data.embedding.batchSize);
 
     const QJsonObject caption = section.value(QLatin1String(kKeyCaption)).toObject();
     data.caption.providerId = readString(caption, QStringLiteral("providerId"));
     data.caption.modelId = readString(caption, QStringLiteral("modelId"));
+    data.caption.baseUrl = readString(caption, QStringLiteral("baseUrl")).trimmed();
     data.caption.maxEdge = readInt(caption, QStringLiteral("maxEdge"), data.caption.maxEdge);
     data.caption.maxTokens = readInt(caption, QStringLiteral("maxTokens"), data.caption.maxTokens);
     const QString profile = readString(caption, QStringLiteral("promptProfile"));
@@ -173,12 +176,14 @@ bool LibraryConfigStore::save(const LibraryConfigData &data, QString *error) con
     QJsonObject embedding;
     embedding.insert(QStringLiteral("providerId"), data.embedding.providerId);
     embedding.insert(QStringLiteral("modelId"), data.embedding.modelId);
+    embedding.insert(QStringLiteral("baseUrl"), data.embedding.baseUrl);
     embedding.insert(QStringLiteral("dimensions"), data.embedding.dimensions);
     embedding.insert(QStringLiteral("batchSize"), data.embedding.batchSize);
 
     QJsonObject caption;
     caption.insert(QStringLiteral("providerId"), data.caption.providerId);
     caption.insert(QStringLiteral("modelId"), data.caption.modelId);
+    caption.insert(QStringLiteral("baseUrl"), data.caption.baseUrl);
     caption.insert(QStringLiteral("maxEdge"), data.caption.maxEdge);
     caption.insert(QStringLiteral("maxTokens"), data.caption.maxTokens);
     caption.insert(QStringLiteral("promptProfile"), data.caption.promptProfile);

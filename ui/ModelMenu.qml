@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Effects
+import QtQuick.Window
 
 /**
  * 模型二级菜单（Popup）：**模型清单 + 思考档位 + 高级原生参数透传**。
@@ -42,16 +43,22 @@ Popup {
         modelList.scrollToCurrent()
     }
 
-    /// 在触发器下方弹出；下方放不下时自动翻到上方，并整体夹在窗口内
+    /// 在触发器下方弹出；下方放不下时自动翻到上方，并整体夹在窗口内。
+    /// 宿主固定为窗口根 Item：菜单挂到窗口层，不会被 Dock / 父容器的 clip 裁剪。
     function openAt(anchorItem, hostItem) {
         refresh()
-        menu.hostItem = hostItem
-        const point = anchorItem.mapToItem(hostItem, 0, anchorItem.height + 6)
-        const popupWidth = Math.min(menu.implicitWidth, hostItem.width - 16)
-        const popupHeight = Math.min(menu.implicitHeight, hostItem.height - 16)
-        x = Math.max(8, Math.min(point.x, hostItem.width - popupWidth - 8))
+        const host = hostItem ? hostItem
+                              : (anchorItem.Window.window ? anchorItem.Window.window.contentItem
+                                                          : anchorItem)
+        menu.hostItem = host
+        if (menu.parent !== host)
+            menu.parent = host
+        const point = anchorItem.mapToItem(host, 0, anchorItem.height + 6)
+        const popupWidth = Math.min(menu.implicitWidth, host.width - 16)
+        const popupHeight = Math.min(menu.implicitHeight, host.height - 16)
+        x = Math.max(8, Math.min(point.x, host.width - popupWidth - 8))
         let top = point.y
-        if (top + popupHeight > hostItem.height - 8)
+        if (top + popupHeight > host.height - 8)
             top = point.y - anchorItem.height - 12 - popupHeight
         y = Math.max(8, top)
         open()

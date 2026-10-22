@@ -7,6 +7,7 @@
 #include "storage/LibraryConfigStore.h"
 
 #include <QObject>
+#include <QStringList>
 #include <QVariantList>
 #include <QVariantMap>
 
@@ -83,6 +84,16 @@ class LibraryController : public QObject
     Q_PROPERTY(bool captionReady READ captionReady NOTIFY captionChanged)
     Q_PROPERTY(QString captionStatus READ captionStatus NOTIFY captionChanged)
 
+    // 真实最小请求校验（任务 7/8）：idle / checking / valid / invalid / unverifiable
+    Q_PROPERTY(QString embeddingValidationStatus READ embeddingValidationStatus
+                   NOTIFY embeddingValidationChanged)
+    Q_PROPERTY(QString embeddingValidationMessage READ embeddingValidationMessage
+                   NOTIFY embeddingValidationChanged)
+    Q_PROPERTY(QString captionValidationStatus READ captionValidationStatus
+                   NOTIFY captionValidationChanged)
+    Q_PROPERTY(QString captionValidationMessage READ captionValidationMessage
+                   NOTIFY captionValidationChanged)
+
     Q_PROPERTY(QVariantMap estimate READ estimate NOTIFY estimateChanged)
     Q_PROPERTY(QVariantList searchResults READ searchResults NOTIFY searchChanged)
 
@@ -133,6 +144,10 @@ public:
     QString captionModelId() const;
     bool captionReady() const;
     QString captionStatus() const;
+    QString embeddingValidationStatus() const;
+    QString embeddingValidationMessage() const;
+    QString captionValidationStatus() const;
+    QString captionValidationMessage() const;
 
     QVariantMap estimate() const;
     QVariantList searchResults() const;
@@ -188,12 +203,30 @@ public:
     Q_INVOKABLE QString suggestedEmbeddingModel(const QString &providerId) const;
     Q_INVOKABLE QString suggestedCaptionModel(const QString &providerId) const;
     Q_INVOKABLE bool saveEmbeddingConfig(const QString &providerId, const QString &modelId,
-                                         int dimensions = 0);
+                                         int dimensions = 0, const QString &baseUrl = QString());
     Q_INVOKABLE bool saveEmbeddingKey(const QString &apiKey);
-    Q_INVOKABLE bool saveCaptionConfig(const QString &providerId, const QString &modelId);
+    Q_INVOKABLE bool saveCaptionConfig(const QString &providerId, const QString &modelId,
+                                       const QString &baseUrl = QString());
     Q_INVOKABLE bool saveCaptionKey(const QString &apiKey);
     Q_INVOKABLE bool hasEmbeddingKey() const;
     Q_INVOKABLE bool hasCaptionKey() const;
+    /// 显式清空本服务专用地址（回退到对话地址 / catalog 默认）
+    Q_INVOKABLE bool clearEmbeddingBaseUrl();
+    Q_INVOKABLE bool clearCaptionBaseUrl();
+
+    // ---- 服务连通性校验与模型清单（任务 7/8/10）----
+    /// 发一次极小 embedding 请求；结果看 embeddingValidationStatus/Message
+    Q_INVOKABLE void validateEmbeddingConfig();
+    /// 发一张内置 8×8 PNG；结果看 captionValidationStatus/Message
+    Q_INVOKABLE void validateCaptionConfig();
+    /// 异步拉取：完成时回 embeddingModelsFetched(ids, error)
+    Q_INVOKABLE void fetchEmbeddingModels();
+    /// 异步拉取：完成时回 captionModelsFetched(ids, error)
+    Q_INVOKABLE void fetchCaptionModels();
+
+    /// 当前生效地址（只读，用于 UI 展示与优先级核对；不含 Key）
+    QString effectiveEmbeddingBaseUrl() const;
+    QString effectiveCaptionBaseUrl() const;
 
     // ---- 库内搜索（纯本地关键词，不联网）----
     Q_INVOKABLE void search(const QString &query);
@@ -210,6 +243,11 @@ signals:
     void retrievalChanged();
     void embeddingChanged();
     void captionChanged();
+    void embeddingValidationChanged();
+    void captionValidationChanged();
+    /// 模型清单拉取完成：ids 为空时 error 必为明确中文原因
+    void embeddingModelsFetched(const QStringList &ids, const QString &error);
+    void captionModelsFetched(const QStringList &ids, const QString &error);
     void estimateChanged();
     void searchChanged();
     void progressChanged();
@@ -222,7 +260,17 @@ private:
     void applyRetrievalConfig();
     void applyEmbeddingConfig();
     void rebuildCaptionService();
-    ProviderConfig buildProviderConfig(const QString &providerId, const QString &keyPrefix) const;
+    /**
+     * 组装 ProviderConfig。
+     *
+     * 地址优先级：本服务显式 baseUrl > 对话自定义 baseUrl（仅同厂商且本服务未填时）
+     * > catalog 默认 baseUrl。embedding 与 caption 各自传入自己的 serviceBaseUrl，
+     * 互不串用。
+     */
+    ProviderConfig buildProviderConfig(const QString &providerId, const QString &keyPrefix,
+                                       const QString &serviceBaseUrl = QString()) const;
+    /// 解析地址优先级（供 effective*BaseUrl 与 buildProviderConfig 共用）
+    QString resolveBaseUrl(const QString &providerId, const QString &serviceBaseUrl) const;
     bool hasKey(const QString &keyId) const;
     void indexFiles(const QList<qint64> &fileIds);
     qint64 ensureCollection();
@@ -249,6 +297,10 @@ private:
     std::unique_ptr<ImageCaptionService> m_caption;
     std::unique_ptr<LibraryIndexer> m_indexer;
     CostEstimator m_cost;
+    bool m_captionModelsFetching = false;
+    /// 尚未创建 caption 服务时（配置不完整）用于承载校验结论
+    QString m_captionValidationFallbackStatus;
+    QString m_captionValidationFallbackMessage;
 
     LibraryConfigData m_config;
     qint64 m_currentCollectionId = 0;

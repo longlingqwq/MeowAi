@@ -3,6 +3,8 @@
 #include "storage/Database.h"
 
 #include <QDir>
+#include <QSqlDatabase>
+#include <QSqlQuery>
 #include <QTemporaryDir>
 #include <QtTest>
 
@@ -26,6 +28,8 @@ private slots:
     void modelStreamingIsThrottledThenCommitted();
     void interruptedStreamingDemotedToPartial();
     void requestHistoryIsBounded();
+    void usageAndElapsedPersistAndReload();
+    void legacyV3DatabaseUpgradesInPlace();
     void degradedModeWithoutDatabase();
 
 private:
@@ -263,6 +267,111 @@ void TstChatStore::requestHistoryIsBounded()
     model.beginAssistantMessage();
     const int beforePlaceholder = model.requestHistory(100, 100000).size();
     QCOMPARE(beforePlaceholder, 6);
+}
+
+void TstChatStore::usageAndElapsedPersistAndReload()
+{
+    QTemporaryDir tmp;
+    QVERIFY(tmp.isValid());
+
+    Database db;
+    QString error;
+    QVERIFY(db.open(freshDbPath(tmp), &error));
+    QVERIFY(db.ensureSchema(&error));
+
+    ChatStore store(&db);
+    ChatHistoryModel model(&store);
+    model.reload();
+
+    model.appendUserMessage(QStringLiteral("统计一下"));
+    model.beginAssistantMessage();
+
+    ChatUsage usage;
+    usage.promptTokens = 11;
+    usage.completionTokens = 22;
+    usage.totalTokens = 33;
+    model.finalizeAssistantMessage(QStringLiteral("complete"), QStringLiteral("完成"),
+                                   usage, 1234);
+
+    QCOMPARE(model.data(model.index(1, 0), ChatHistoryModel::TotalTokensRole).toInt(), 33);
+    QCOMPARE(model.data(model.index(1, 0), ChatHistoryModel::PromptTokensRole).toInt(), 11);
+    QCOMPARE(model.data(model.index(1, 0), ChatHistoryModel::CompletionTokensRole).toInt(), 22);
+    QCOMPARE(model.data(model.index(1, 0), ChatHistoryModel::ElapsedMsRole).toLongLong(), 1234);
+
+    QList<MessageRecord> persisted = store.messages(model.conversationId(), &error);
+    QCOMPARE(persisted.size(), 2);
+    QCOMPARE(persisted.last().totalTokens, 33);
+    QCOMPARE(persisted.last().promptTokens, 11);
+    QCOMPARE(persisted.last().completionTokens, 22);
+    QCOMPARE(persisted.last().elapsedMs, 1234);
+
+    // 无 usage 时存 -1（失败 / 取消 / 厂商未回传）
+    model.appendUserMessage(QStringLiteral("再问一次"));
+    model.beginAssistantMessage();
+    model.finalizeAssistantMessage(QStringLiteral("error"));
+    persisted = store.messages(model.conversationId(), &error);
+    QCOMPARE(persisted.last().totalTokens, -1);
+    QCOMPARE(persisted.last().promptTokens, -1);
+    QCOMPARE(persisted.last().completionTokens, -1);
+    QCOMPARE(persisted.last().elapsedMs, -1);
+
+    // 重开模型：新角色可读
+    ChatHistoryModel reloaded(&store);
+    reloaded.reload();
+    QCOMPARE(reloaded.data(reloaded.index(1, 0), ChatHistoryModel::TotalTokensRole).toInt(), 33);
+    QCOMPARE(reloaded.data(reloaded.index(1, 0), ChatHistoryModel::ElapsedMsRole).toLongLong(),
+             1234);
+}
+
+void TstChatStore::legacyV3DatabaseUpgradesInPlace()
+{
+    QTemporaryDir tmp;
+    QVERIFY(tmp.isValid());
+    const QString path = freshDbPath(tmp);
+    const QString connection = QStringLiteral("legacy-v3");
+
+    {
+        QSqlDatabase legacy = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), connection);
+        legacy.setDatabaseName(path);
+        QVERIFY(legacy.open());
+        QSqlQuery query(legacy);
+        QVERIFY(query.exec(QStringLiteral(
+            "CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL DEFAULT '')")));
+        QVERIFY(query.exec(QStringLiteral(
+            "CREATE TABLE conversations (id INTEGER PRIMARY KEY AUTOINCREMENT,"
+            " title TEXT NOT NULL DEFAULT '', created_at INTEGER NOT NULL DEFAULT 0,"
+            " updated_at INTEGER NOT NULL DEFAULT 0)")));
+        QVERIFY(query.exec(QStringLiteral(
+            "CREATE TABLE messages (id INTEGER PRIMARY KEY AUTOINCREMENT,"
+            " conversation_id INTEGER NOT NULL, role TEXT NOT NULL,"
+            " content TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'complete',"
+            " created_at INTEGER NOT NULL DEFAULT 0)")));
+        QVERIFY(query.exec(QStringLiteral(
+            "INSERT INTO meta (key, value) VALUES ('schema_version', '3')")));
+        QVERIFY(query.exec(QStringLiteral(
+            "INSERT INTO conversations (id, title, created_at, updated_at)"
+            " VALUES (1, '旧会话', 1000, 1000)")));
+        QVERIFY(query.exec(QStringLiteral(
+            "INSERT INTO messages (conversation_id, role, content, status, created_at)"
+            " VALUES (1, 'user', '旧消息', 'complete', 1000)")));
+        legacy.close();
+    }
+    QSqlDatabase::removeDatabase(connection);
+
+    Database db;
+    QString error;
+    QVERIFY2(db.open(path, &error), qPrintable(error));
+    // 旧库自动补列；失败不崩溃
+    QVERIFY2(db.ensureSchema(&error), qPrintable(error));
+    QVERIFY2(db.ensureSchema(&error), qPrintable(error));  // 幂等
+
+    ChatStore store(&db);
+    const QList<MessageRecord> messages = store.messages(1, &error);
+    QVERIFY2(error.isEmpty(), qPrintable(error));
+    QCOMPARE(messages.size(), 1);
+    QCOMPARE(messages.first().content, QStringLiteral("旧消息"));
+    QCOMPARE(messages.first().totalTokens, -1);
+    QCOMPARE(messages.first().elapsedMs, -1);
 }
 
 void TstChatStore::degradedModeWithoutDatabase()

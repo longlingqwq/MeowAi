@@ -38,6 +38,10 @@ public:
         MessageIdRole,
         StatusRole,
         CreatedAtRole,
+        TotalTokensRole,
+        PromptTokensRole,
+        CompletionTokensRole,
+        ElapsedMsRole,
     };
 
     /// store 可为 nullptr（依赖未就绪时模型仍可构造，只是不可持久化）
@@ -68,7 +72,14 @@ public:
     /// 流式增量：内存立即追加，落库按 kFlushIntervalMs 节流
     void appendAssistantDelta(const QString &delta);
     /// 终局：status ∈ complete | partial | error；finalText 非空时以它为准（对齐整包响应）
-    void finalizeAssistantMessage(const QString &status, const QString &finalText = QString());
+    /// usage / elapsedMs 为 -1 表示未知（失败、取消、厂商未回传）
+    void finalizeAssistantMessage(const QString &status, const QString &finalText = QString(),
+                                  const ChatUsage &usage = ChatUsage(), qint64 elapsedMs = -1);
+
+    /// 最后一条用户消息文本（重新生成用）；不存在时返回空串
+    QString lastUserMessageText() const;
+    /// 删除最后一条助手消息（含 error / partial），持久化层同步删除
+    void removeLastAssistantMessage();
 
     /// 有界上下文：从最新往前取，跳过空占位与失败消息，受条数与字符数双重限制
     QList<ChatMessage> requestHistory(int maxMessages, int maxChars) const;
@@ -87,6 +98,10 @@ private:
         QString content;
         QString status;
         qint64 createdAt = 0;
+        int totalTokens = -1;
+        int promptTokens = -1;
+        int completionTokens = -1;
+        qint64 elapsedMs = -1;
     };
 
     void setLastError(const QString &message);

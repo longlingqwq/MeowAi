@@ -10,7 +10,7 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-find_package(Qt6 6.5 REQUIRED COMPONENTS Core Gui Qml Quick Network Sql Test Multimedia QuickControls2)
+find_package(Qt6 6.5 REQUIRED COMPONENTS Core Gui Qml Quick Network Sql Test Multimedia QuickControls2 Svg)
 
 qt_standard_project_setup(REQUIRES 6.5)
 
@@ -151,6 +151,12 @@ qt_add_qml_module(MeowAi
         ui/EyeMark.qml
         ui/MAvatar.qml
         ui/TitleBar.qml
+        # 外壳组件（M1）：侧栏 / 模型条 / 会话列表容器 / 资料库配置面板 / 头像裁剪
+        ui/Sidebar.qml
+        ui/ModelStrip.qml
+        ui/ConversationList.qml
+        ui/LibraryConfigPanel.qml
+        ui/AvatarCrop.qml
         ui/ModelMenu.qml
         ui/WebSearchPanel.qml
         # 页面
@@ -159,6 +165,9 @@ qt_add_qml_module(MeowAi
         ui/LibraryPage.qml
         ui/LibraryConsent.qml
         ui/SplashVideo.qml
+        ui/SplashIntro.qml
+        # 品牌标识：按主题选用琥珀 / 浅蓝官方 logo
+        ui/BrandLogo.qml
 )
 
 # 内置 Skill 资源（功能 #9)：运行期路径为 ":/skills/<id>/manifest.json"
@@ -168,6 +177,19 @@ qt_add_resources(MeowAi "skills"
     FILES
         resources/skills/example/manifest.json
         resources/skills/example/skill.md
+)
+
+# 内置开屏资源（功能 #11）：两版共用一条离线合成的音轨，运行期路径 ":/splash/audio/intro.wav"。
+qt_add_resources(MeowAi "splash"
+    PREFIX "/splash"
+    BASE resources/splash
+    FILES
+        resources/splash/audio/intro.wav
+        # 官方 logo 拆分件：cat 去掉星点与文字（星点由动画自绘），word 仅文字
+        resources/splash/amber/cat.svg
+        resources/splash/amber/word.svg
+        resources/splash/blue/cat.svg
+        resources/splash/blue/word.svg
 )
 
 # 主题预设（阶段三）：运行期路径为 ":/themes/theme1.json"。
@@ -205,12 +227,18 @@ qt_add_resources(MeowAi "branding"
     BASE resources/branding
     FILES
         resources/branding/app.png
+        # 官方品牌 logo：logo 含猫 + 星点 + 文字，mark 仅猫 + 星点（紧凑位置）
+        resources/branding/logo-amber.svg
+        resources/branding/logo-blue.svg
+        resources/branding/mark-amber.svg
+        resources/branding/mark-blue.svg
 )
 
 # 可执行程序是 QML 宿主：Multimedia 仅用于 QML 侧开屏视频播放（功能 #11），
 # QuickControls2 仅用于在 main.cpp 里锁定 Basic 样式（全自绘 UI 的前提），
-# 两者都不进入 core 层，保持分层不被污染。
-target_link_libraries(MeowAi PRIVATE MeowAiLib Qt6::Quick Qt6::Multimedia Qt6::QuickControls2)
+# Svg 提供 Image 加载 .svg 的图片插件（品牌 logo 资源），
+# 三者都不进入 core 层，保持分层不被污染。
+target_link_libraries(MeowAi PRIVATE MeowAiLib Qt6::Quick Qt6::Multimedia Qt6::QuickControls2 Qt6::Svg)
 
 # ---------------------------------------------------------------------------
 # PDFium（可选依赖，模块 M3-c：PDF 文本层解析）

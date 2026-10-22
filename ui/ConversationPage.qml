@@ -1,14 +1,19 @@
 import QtQuick
 import QtQuick.Controls
+import QtQuick.Dialogs
 
 /**
- * 对话页：**左侧会话列表**（多会话 / 新建 / 切换 / 删除）+ 接入设置（厂商 / 模型 / 档位 / 密钥）
- * + 消息流 + 输入条。
+ * 对话页：接入设置（厂商 / 模型 / 档位 / 密钥）+ 消息流 + 输入条。
+ *
+ * 会话列表与模型选择条已抽为独立组件（ConversationList / ModelStrip），
+ * 由外壳统一放置；本页不再内置左侧会话面板与“当前模型”条，消息区占满整宽。
  *
  * 纯展示与绑定：
  *  - 消息流直接绑定 core 的会话历史模型 `History`（ChatHistoryModel），
  *    持久化、上下文裁剪、流式节流都在 core 层，本文件不碰数据库；
  *  - 发送经 `Chat`（ChatController）转发，本文件不碰网络与密钥；
+ *  - 助手消息经 `Chat.renderMarkdown()` 转成 RichText HTML；链接交给系统浏览器，
+ *    复制 / 重新生成 / 分享图片等动作只转发 `Chat` 或本页的 UI 能力；
  *  - 厂商 / 模型 / 档位全部来自 `Chat.providerOptions()` / `modelOptions()` / `thinkingLevels`，
  *    即 core/ai/ProviderCatalog 的数据视图——**新增厂商零 UI 改动**。
  *
@@ -17,10 +22,16 @@ import QtQuick.Controls
 Item {
     id: page
 
-    /// 气泡最大宽度：任何一行都不该横贯整个窗口
-    readonly property real bubbleMaxWidth: Math.min(620, Math.max(320, page.width - 260) * 0.78)
+    /// 气泡最大宽度：富文本同样受这个上限约束，避免表格 / 代码块横贯整窗
+    readonly property real bubbleMaxWidth: Math.min(760, Math.max(240, page.width - 96))
     /// 统一展示的错误：优先网络 / 密钥错误，其次会话历史错误
     readonly property string errorText: Chat.lastError.length > 0 ? Chat.lastError : History.lastError
+
+    /// grabToImage 的产物，等保存对话框确认后落盘
+    property var pendingMessageImage: null
+
+    /// 接入配置面板是否展开：由外壳次顶部 Dock 的「配置」按钮驱动，本页不做开关逻辑
+    property bool configOpen: false
 
     /// 厂商 / 模型下拉的数据快照：ComboBox 需要字符串数组，id 单独并行保存
     property var providerNames: []
@@ -43,10 +54,41 @@ Item {
         }
     }
 
-    /// 厂商的展示名（下拉里存的是展示名数组，这里按 id 反查，避免再存一份映射）
-    function providerLabel(providerId) {
-        const index = page.providerIds.indexOf(providerId)
-        return index >= 0 ? page.providerNames[index] : providerId
+    /// 助手正文的 RichText：M5 负责 Markdown → HTML，QML 不做 Markdown 解析。
+    /// `QTextDocumentFragment::toHtml()` 会在 <body> 上写死 'Sans Serif'/9pt，
+    /// 会盖掉 Theme 字体，这里只清掉这两个声明，其余结构原样交给 Text.RichText。
+    function markdownHtml(text) {
+        return Chat.renderMarkdown(text).replace(/<body([^>]*)>/i, function (tag, attrs) {
+            return "<body" + attrs.replace(/\s*font-(?:family|size)\s*:\s*[^;"]*;?/gi, "") + ">"
+        })
+    }
+
+    /// 写入系统剪贴板：TextEdit 是 QtQuick 的 UI 能力，不涉及业务数据
+    function copyText(value) {
+        clipHelper.text = value
+        clipHelper.selectAll()
+        clipHelper.copy()
+    }
+
+    /// FileDialog 的 selectedFile 是 file:// URL，saveToFile 需要本地路径
+    function localPath(urlValue) {
+        const raw = String(urlValue)
+        if (raw.indexOf("file:///") !== 0)
+            return raw
+        let path = decodeURIComponent(raw.substring(8))
+        if (!/^[A-Za-z]:/.test(path))
+            path = "/" + path
+        return path
+    }
+
+    /// 抓取气泡成 PNG，再交给保存对话框
+    function shareImage(item) {
+        item.grabToImage(function (result) {
+            if (!result)
+                return
+            page.pendingMessageImage = result
+            saveImageDialog.open()
+        })
     }
 
     function refreshProviders() {
@@ -82,10 +124,6 @@ Item {
     function refreshSelection() {
         refreshModels()
         refreshAdvanced()
-    }
-
-    function openModelMenu() {
-        modelMenu.openAt(modelPill, page)
     }
 
     /// 密钥三态徽标（文案与色调都只在这里映射，避免散落各处）
@@ -133,224 +171,19 @@ Item {
         refreshSelection()
     }
 
-    // ================================================================= 会话列表
-    MSurface {
-        id: convPanel
-        anchors.left: parent.left
-        anchors.top: parent.top
-        anchors.bottom: parent.bottom
-        width: 208
-
-        MButton {
-            id: newConvBtn
-            anchors.left: parent.left
-            anchors.right: parent.right
-            anchors.top: parent.top
-            anchors.leftMargin: Theme.s3
-            anchors.rightMargin: Theme.s3
-            anchors.topMargin: Theme.s3
-            text: qsTr("＋ 新对话")
-            variant: "primary"
-            small: true
-            onClicked: History.newConversation()
-        }
-
-        MLabel {
-            id: convLabel
-            anchors.left: parent.left
-            anchors.top: newConvBtn.bottom
-            anchors.leftMargin: Theme.s3
-            anchors.topMargin: Theme.s4
-            label: qsTr("会话")
-            tone: Theme.textGhost
-        }
-
-        ListView {
-            id: convList
-            anchors.left: parent.left
-            anchors.right: parent.right
-            anchors.top: convLabel.bottom
-            anchors.bottom: parent.bottom
-            anchors.leftMargin: Theme.s1
-            anchors.rightMargin: Theme.s1
-            anchors.topMargin: Theme.s2
-            anchors.bottomMargin: Theme.s3
-            clip: true
-            spacing: 2
-            boundsBehavior: Flickable.StopAtBounds
-            model: History.conversations
-
-            ScrollBar.vertical: ScrollBar {
-                id: convScroll
-                policy: ScrollBar.AsNeeded
-                width: 6
-                background: Item { }
-
-                contentItem: Rectangle {
-                    implicitWidth: 3
-                    radius: 2
-                    color: convScroll.pressed ? Theme.accent : Theme.hairlineStrong
-                    opacity: convScroll.active ? 0.9 : 0.35
-                }
-            }
-
-            delegate: Item {
-                id: convItem
-                required property var modelData
-
-                width: ListView.view ? ListView.view.width : 0
-                height: 38
-
-                readonly property bool current: History.conversationId === convItem.modelData.id
-
-                Rectangle {
-                    anchors.fill: parent
-                    radius: Theme.rMd
-                    color: convItem.current
-                           ? Theme.accentGhost
-                           : (convHover.hovered ? Theme.overlayFaint : "transparent")
-
-                    Behavior on color {
-                        ColorAnimation { duration: Theme.dFast }
-                    }
-                }
-
-                Rectangle {
-                    visible: convItem.current
-                    anchors.left: parent.left
-                    anchors.verticalCenter: parent.verticalCenter
-                    width: 2
-                    height: 16
-                    radius: 1
-                    color: Theme.accent
-                }
-
-                Text {
-                    anchors.left: parent.left
-                    anchors.leftMargin: Theme.s2 + 4
-                    anchors.right: delBtn.left
-                    anchors.rightMargin: Theme.s1
-                    anchors.verticalCenter: parent.verticalCenter
-                    text: convItem.modelData.title.length > 0
-                          ? convItem.modelData.title
-                          : qsTr("新对话")
-                    color: convItem.current ? Theme.text : Theme.textDim
-                    font.pixelSize: Theme.fSmall
-                    elide: Text.ElideRight
-                }
-
-                Item {
-                    id: delBtn
-                    anchors.right: parent.right
-                    anchors.rightMargin: Theme.s1
-                    anchors.verticalCenter: parent.verticalCenter
-                    width: 22
-                    height: 22
-                    visible: convHover.hovered
-
-                    Rectangle {
-                        anchors.fill: parent
-                        radius: Theme.rSm
-                        color: delHover.hovered ? Theme.dangerGhost : "transparent"
-                    }
-
-                    Text {
-                        anchors.centerIn: parent
-                        text: "\u2715"
-                        color: delHover.hovered ? Theme.danger : Theme.textFaint
-                        font.pixelSize: Theme.fSmall
-                    }
-
-                    HoverHandler { id: delHover }
-                    TapHandler { onTapped: History.removeConversation(convItem.modelData.id) }
-                }
-
-                HoverHandler { id: convHover }
-                TapHandler { onTapped: History.openConversation(convItem.modelData.id) }
-            }
-
-            Text {
-                anchors.centerIn: parent
-                visible: convList.count === 0
-                text: qsTr("暂无会话")
-                color: Theme.textGhost
-                font.pixelSize: Theme.fSmall
-            }
-        }
-    }
-
-    // ============================================================ 接入设置卡
+    // ============================================================ 接入配置面板
+    // 展开状态由外壳（次顶部 Dock 的「配置」按钮）驱动；收起时整卡高度归零，
+    // 页面不再保留「接入 / chips / 配置」这一行。
     MSurface {
         id: connCard
-        anchors.left: convPanel.right
+        anchors.left: parent.left
         anchors.right: parent.right
         anchors.top: parent.top
-        anchors.leftMargin: Theme.s4
-        height: connCard.expanded ? connHead.height + connBody.implicitHeight + Theme.s4 : 56
+        height: page.configOpen ? connBody.implicitHeight + Theme.s4 * 2 : 0
         clip: true
-
-        property bool expanded: false
 
         Behavior on height {
             NumberAnimation { duration: Theme.dBase; easing.type: Theme.easeInOut }
-        }
-
-        // ---- 头部（始终可见）----
-        Item {
-            id: connHead
-            anchors.left: parent.left
-            anchors.right: parent.right
-            anchors.top: parent.top
-            height: 56
-
-            Row {
-                anchors.left: parent.left
-                anchors.leftMargin: Theme.s4
-                anchors.verticalCenter: parent.verticalCenter
-                spacing: Theme.s2
-
-                MLabel {
-                    label: qsTr("接入")
-                    anchors.verticalCenter: parent.verticalCenter
-                }
-
-                MChip {
-                    tone: "accent"
-                    text: page.providerLabel(Chat.providerId)
-                    anchors.verticalCenter: parent.verticalCenter
-                }
-
-                MChip {
-                    dot: true
-                    tone: page.credentialTone()
-                    text: page.credentialText()
-                    anchors.verticalCenter: parent.verticalCenter
-                }
-
-                MChip {
-                    visible: !Chat.dataStoreAvailable
-                    tone: "danger"
-                    text: qsTr("本平台不支持加密存储")
-                    anchors.verticalCenter: parent.verticalCenter
-                }
-
-                MChip {
-                    visible: !History.available
-                    tone: "danger"
-                    text: qsTr("会话历史不可用")
-                    anchors.verticalCenter: parent.verticalCenter
-                }
-            }
-
-            MButton {
-                anchors.right: parent.right
-                anchors.rightMargin: Theme.s4
-                anchors.verticalCenter: parent.verticalCenter
-                text: connCard.expanded ? qsTr("收起") : qsTr("配置")
-                variant: "quiet"
-                small: true
-                onClicked: connCard.expanded = !connCard.expanded
-            }
         }
 
         // ---- 展开体 ----
@@ -358,11 +191,13 @@ Item {
             id: connBody
             anchors.left: parent.left
             anchors.right: parent.right
-            anchors.top: connHead.bottom
+            anchors.top: parent.top
             anchors.leftMargin: Theme.s4
             anchors.rightMargin: Theme.s4
+            anchors.topMargin: Theme.s4
             spacing: Theme.s3
-            opacity: connCard.expanded ? 1 : 0
+            opacity: page.configOpen ? 1 : 0
+            enabled: page.configOpen
 
             Behavior on opacity {
                 NumberAnimation { duration: Theme.dBase }
@@ -503,19 +338,6 @@ Item {
                     anchors.verticalCenter: parent.verticalCenter
                 }
 
-                Item {
-                    width: 1
-                    height: 1
-                }
-
-                MButton {
-                    text: qsTr("模型与参数")
-                    variant: "quiet"
-                    small: true
-                    anchors.verticalCenter: parent.verticalCenter
-                    onClicked: page.openModelMenu()
-                }
-
                 MButton {
                     text: qsTr("拉取清单")
                     variant: "quiet"
@@ -607,31 +429,33 @@ Item {
                 }
             }
 
-        }
-    }
+            // 环境异常提示：仅在对应能力不可用时出现
+            Row {
+                width: parent.width
+                spacing: Theme.s2
 
-    // ============================================================ 模型二级菜单
-    ModelMenu {
-        id: modelMenu
-        onConfigureRequested: {
-            modelMenu.close()
-            webPanel.openAt(modelPill, page)
-        }
-    }
+                MChip {
+                    visible: !Chat.dataStoreAvailable
+                    tone: "danger"
+                    text: qsTr("本平台不支持加密存储")
+                }
 
-    // 联网搜索（第三级弹层）：默认不显眼，仅从二级菜单的「配置…」进入
-    // ------------------------------------------------------------------
-    WebSearchPanel {
-        id: webPanel
+                MChip {
+                    visible: !History.available
+                    tone: "danger"
+                    text: qsTr("会话历史不可用")
+                }
+            }
+
+        }
     }
 
     // ---------------------------------------------------------- 底部区
     Column {
         id: bottomArea
-        anchors.left: convPanel.right
+        anchors.left: parent.left
         anchors.right: parent.right
         anchors.bottom: parent.bottom
-        anchors.leftMargin: Theme.s4
         spacing: Theme.s2
 
         // 错误横幅：只在有错误时占位
@@ -671,112 +495,6 @@ Item {
             }
         }
 
-        // 当前选择条：模型触发器（悬停 1s / 单击 / 长按 三种方式打开二级菜单）
-        Item {
-            width: parent.width
-            height: 28
-
-            Row {
-                anchors.left: parent.left
-                anchors.verticalCenter: parent.verticalCenter
-                spacing: Theme.s2
-
-                MLabel {
-                    label: qsTr("当前")
-                    anchors.verticalCenter: parent.verticalCenter
-                }
-
-                Rectangle {
-                    id: modelPill
-                    width: pillText.implicitWidth + Theme.s3 * 2
-                    height: 26
-                    radius: Theme.rPill
-                    color: (pillHover.hovered || modelMenu.visible) ? Theme.accentGhost
-                                                                    : Theme.overlayHover
-                    border.width: 1
-                    border.color: (pillHover.hovered || modelMenu.visible) ? Theme.accentHair
-                                                                           : Theme.hairline
-
-                    Behavior on color {
-                        ColorAnimation { duration: Theme.dFast }
-                    }
-
-                    Text {
-                        id: pillText
-                        anchors.centerIn: parent
-                        width: Math.min(implicitWidth, 220)
-                        elide: Text.ElideRight
-                        horizontalAlignment: Text.AlignHCenter
-                        text: page.providerLabel(Chat.providerId) + " · "
-                              + (Chat.modelId.length > 0 ? Chat.modelId : qsTr("未选择模型"))
-                        color: (pillHover.hovered || modelMenu.visible) ? Theme.accentHi : Theme.textDim
-                        font.pixelSize: Theme.fLabel
-                        font.weight: Font.Medium
-                    }
-
-                    HoverHandler {
-                        id: pillHover
-                        onHoveredChanged: {
-                            if (hovered)
-                                hoverTimer.restart()
-                            else
-                                hoverTimer.stop()
-                        }
-                    }
-
-                    TapHandler {
-                        onTapped: page.openModelMenu()
-                        onLongPressed: page.openModelMenu()
-                    }
-                }
-
-                Timer {
-                    id: hoverTimer
-                    interval: 1000
-                    onTriggered: page.openModelMenu()
-                }
-
-                MChip {
-                    visible: Chat.thinkingLevel.length > 0
-                    tone: "neutral"
-                    text: qsTr("档位 %1").arg(page.levelLabel(Chat.thinkingLevel))
-                    anchors.verticalCenter: parent.verticalCenter
-                }
-
-                MChip {
-                    visible: Chat.supportsVision
-                    tone: "neutral"
-                    text: qsTr("支持图片")
-                    anchors.verticalCenter: parent.verticalCenter
-                }
-
-                MChip {
-                    visible: page.hasAdvanced
-                    tone: "accent"
-                    text: qsTr("高级参数")
-                    anchors.verticalCenter: parent.verticalCenter
-                }
-
-                MChip {
-                    visible: Chat.webSearchEnabled
-                    dot: true
-                    tone: Chat.webSearchReady ? "ok" : "accent"
-                    text: Chat.webSearchSearching ? qsTr("正在联网搜索…")
-                                                  : (Chat.webSearchReady ? qsTr("智能联网")
-                                                                         : qsTr("联网未就绪"))
-                    anchors.verticalCenter: parent.verticalCenter
-                }
-
-                MButton {
-                    text: qsTr("模型与参数")
-                    variant: "quiet"
-                    small: true
-                    anchors.verticalCenter: parent.verticalCenter
-                    onClicked: page.openModelMenu()
-                }
-            }
-        }
-
         // 联网来源 chip：仅在本轮检索命中时出现（数据来自 Chat；本文件不碰网络）
         Item {
             width: parent.width
@@ -806,41 +524,6 @@ Item {
                               ? modelData.title.substring(0, 20) + "…"
                               : modelData.title
                     }
-                }
-            }
-        }
-
-        // 资料库命中概览：挂载数 / 命中片段数 / 本轮注入 token（数据来自 Chat，本文件不检索）
-        Item {
-            width: parent.width
-            height: libraryStatusFlow.height
-            visible: Chat.libraryMounted || Chat.libraryStatus.length > 0
-
-            Flow {
-                id: libraryStatusFlow
-                width: parent.width
-                spacing: Theme.s2
-
-                MChip {
-                    visible: Chat.libraryMounted
-                    dot: true
-                    tone: Chat.libraryDegraded ? "accent" : "ok"
-                    maxWidth: libraryStatusFlow.width
-                    text: qsTr("资料库 · %1 个小库").arg(Chat.mountedCollections.length)
-                }
-
-                MChip {
-                    visible: Chat.libraryHitCount > 0
-                    tone: "ok"
-                    maxWidth: libraryStatusFlow.width
-                    text: qsTr("%1 个片段 · %2 token").arg(Chat.libraryHitCount).arg(Chat.libraryTokenCount)
-                }
-
-                MChip {
-                    visible: Chat.libraryStatus.length > 0
-                    tone: Chat.libraryDegraded ? "accent" : "neutral"
-                    maxWidth: libraryStatusFlow.width
-                    text: Chat.libraryStatus
                 }
             }
         }
@@ -927,7 +610,7 @@ Item {
                     width: parent.width
                     spacing: Theme.s2
 
-                    // 「智能联网」开关：像网页端一样随手开合（UI 侧唯一显眼入口，配置收进第三级弹层）
+                    // 「联网搜索」开关：像网页端一样随手开合（UI 侧唯一显眼入口，配置收进第三级弹层）
                     Rectangle {
                         id: webToggle
                         width: webToggleRow.implicitWidth + 20
@@ -959,7 +642,7 @@ Item {
                             }
 
                             Text {
-                                text: Chat.webSearchSearching ? qsTr("联网中…") : qsTr("智能联网")
+                                text: Chat.webSearchSearching ? qsTr("联网中…") : qsTr("联网搜索")
                                 color: Chat.webSearchEnabled ? Theme.accentInk : Theme.textDim
                                 font.pixelSize: Theme.fLabel
                                 font.weight: Font.Medium
@@ -1178,12 +861,12 @@ Item {
     // ---------------------------------------------------------- 消息流
     ListView {
         id: transcriptView
-        anchors.left: convPanel.right
+        anchors.left: parent.left
         anchors.right: parent.right
-        anchors.leftMargin: Theme.s4
         anchors.top: connCard.bottom
         anchors.bottom: bottomArea.top
-        anchors.topMargin: Theme.s4
+        // 顶部不额外留白：滚动时消息直接裁在 Dock 下沿，避免出现空白带
+        anchors.topMargin: page.configOpen ? Theme.s4 : 0
         anchors.bottomMargin: Theme.s4
         clip: true
         spacing: 0
@@ -1212,14 +895,28 @@ Item {
             required property string content
             required property string status
             required property int messageId
+            required property var totalTokens
+            required property var elapsedMs
 
             width: ListView.view ? ListView.view.width : 0
-            height: bubble.height + Theme.s4
+            height: bubble.height + (actions.visible ? actions.height + 6 : 0) + Theme.s4
 
             readonly property bool isUser: wrapper.role === "user"
             readonly property bool thinking: wrapper.status === "streaming" && wrapper.content.length === 0
+            readonly property bool completeAssistant: !wrapper.isUser && wrapper.status === "complete"
             readonly property real maxWidth: page.bubbleMaxWidth
 
+            /// 用户消息纯文本；助手消息由 M5 转成 RichText HTML，QML 内不解析 Markdown
+            readonly property int bodyFormat: (wrapper.isUser || wrapper.thinking) ? Text.PlainText
+                                                                                   : Text.RichText
+            readonly property string displayText: wrapper.thinking
+                                                  ? qsTr("正在思考…")
+                                                  : (wrapper.isUser
+                                                     ? wrapper.content
+                                                     : page.markdownHtml(wrapper.content))
+
+            /// 复制成功的短暂反馈
+            property bool copied: false
             /// 流式时竖线呼吸
             property real pulse: 1.0
 
@@ -1230,12 +927,21 @@ Item {
                 NumberAnimation { from: 0.3; to: 1.0; duration: 620; easing.type: Easing.InOutQuad }
             }
 
-            // 用于测量单行自然宽度（自身不受宽度约束）
+            Timer {
+                id: copyTimer
+                interval: 1500
+                onTriggered: wrapper.copied = false
+            }
+
+            // 自然宽度测量：与正文同字体、同 HTML，但禁止换行；
+            // 富文本不能用“单行文本宽度”估高，宽度只用于决定气泡横向尺寸。
             Text {
                 id: measureText
                 visible: false
-                text: wrapper.thinking ? qsTr("正在思考…") : wrapper.content
+                textFormat: wrapper.bodyFormat
+                text: wrapper.displayText
                 font.pixelSize: Theme.fBody
+                wrapMode: Text.NoWrap
             }
 
             Rectangle {
@@ -1245,7 +951,7 @@ Item {
                 readonly property int railWidth: wrapper.isUser ? 0 : 10
 
                 width: Math.min(wrapper.maxWidth,
-                                Math.ceil(measureText.implicitWidth) + bubble.hPad * 2 + bubble.railWidth)
+                                Math.ceil(measureText.implicitWidth) + bubble.hPad * 2 + bubble.railWidth + 2)
                 height: roleTag.implicitHeight + 6 + bodyText.implicitHeight + bubble.vPad * 2
                 anchors.top: parent.top
                 anchors.left: wrapper.isUser ? undefined : parent.left
@@ -1288,12 +994,297 @@ Item {
                     anchors.leftMargin: bubble.hPad + bubble.railWidth
                     anchors.rightMargin: bubble.hPad
                     anchors.topMargin: 6
-                    text: wrapper.thinking ? qsTr("正在思考…") : wrapper.content
+                    textFormat: wrapper.bodyFormat
+                    text: wrapper.displayText
                     color: wrapper.thinking ? Theme.textFaint
                                             : (wrapper.status === "error" ? Theme.danger : Theme.text)
+                    linkColor: Theme.accentHi
                     font.pixelSize: Theme.fBody
                     lineHeight: 1.55
                     wrapMode: Text.Wrap
+
+                    onLinkActivated: function (link) {
+                        Qt.openUrlExternally(link)
+                    }
+                }
+            }
+
+            // 回答操作条：只给已完成（complete）的助手消息；流式与错误消息不显示。
+            // 四个动作均为 14×14 自绘线条图标（矩形 / 旋转矩形），不依赖图标字体。
+            Flow {
+                id: actions
+                visible: wrapper.completeAssistant
+                anchors.left: bubble.left
+                anchors.top: bubble.bottom
+                anchors.topMargin: 6
+                width: wrapper.width
+                height: implicitHeight
+                spacing: Theme.s2
+
+                // 复制：两个错位矩形
+                Item {
+                    id: copyAction
+                    width: 14
+                    height: 14
+
+                    readonly property color iconColor: wrapper.copied ? Theme.accentHi
+                                                                      : (copyHover.hovered ? Theme.text : Theme.textFaint)
+
+                    Rectangle {
+                        x: 1; y: 4; width: 7; height: 9
+                        color: "transparent"
+                        border.width: 1.2
+                        border.color: copyAction.iconColor
+                    }
+                    Rectangle {
+                        x: 5; y: 1; width: 8; height: 9
+                        color: "transparent"
+                        border.width: 1.2
+                        border.color: copyAction.iconColor
+                    }
+
+                    HoverHandler { id: copyHover }
+
+                    TapHandler {
+                        cursorShape: Qt.PointingHandCursor
+                        onTapped: {
+                            page.copyText(wrapper.content)
+                            wrapper.copied = true
+                            copyTimer.restart()
+                        }
+                    }
+
+                    ToolTip {
+                        id: copyTip
+                        delay: 600
+                        visible: copyHover.hovered
+                        text: wrapper.copied ? qsTr("已复制") : qsTr("复制")
+                        x: Math.round((copyAction.width - width) / 2)
+                        y: -height - 6
+                        padding: 6
+                        background: Rectangle {
+                            radius: Theme.rSm
+                            color: Theme.ink3
+                            border.width: 1
+                            border.color: Theme.hairlineStrong
+                        }
+                        contentItem: Text {
+                            text: copyTip.text
+                            color: Theme.text
+                            font.pixelSize: Theme.fLabel
+                        }
+                    }
+                }
+
+                // 重新生成：圆环 + 右上箭头
+                Item {
+                    id: regenAction
+                    width: 14
+                    height: 14
+                    opacity: Chat.busy ? 0.4 : 1.0
+
+                    readonly property color iconColor: regenHover.hovered && !Chat.busy ? Theme.text
+                                                                                        : Theme.textFaint
+
+                    Rectangle {
+                        x: 2.5; y: 2.5; width: 9; height: 9; radius: 4.5
+                        color: "transparent"
+                        border.width: 1.2
+                        border.color: regenAction.iconColor
+                    }
+                    Rectangle {
+                        x: 8.4; y: 1; width: 3.4; height: 1.2
+                        color: regenAction.iconColor
+                    }
+                    Rectangle {
+                        x: 10.4; y: 0
+                        width: 1.2; height: 2.2
+                        color: regenAction.iconColor
+                        rotation: 45
+                        transformOrigin: Item.Center
+                    }
+                    Rectangle {
+                        x: 10.4; y: 1.9
+                        width: 1.2; height: 2.2
+                        color: regenAction.iconColor
+                        rotation: -45
+                        transformOrigin: Item.Center
+                    }
+
+                    HoverHandler { id: regenHover }
+
+                    TapHandler {
+                        enabled: !Chat.busy
+                        cursorShape: Qt.PointingHandCursor
+                        onTapped: Chat.regenerateLast()
+                    }
+
+                    ToolTip {
+                        id: regenTip
+                        delay: 600
+                        visible: regenHover.hovered
+                        text: qsTr("重新生成")
+                        x: Math.round((regenAction.width - width) / 2)
+                        y: -height - 6
+                        padding: 6
+                        background: Rectangle {
+                            radius: Theme.rSm
+                            color: Theme.ink3
+                            border.width: 1
+                            border.color: Theme.hairlineStrong
+                        }
+                        contentItem: Text {
+                            text: regenTip.text
+                            color: Theme.text
+                            font.pixelSize: Theme.fLabel
+                        }
+                    }
+                }
+
+                // 分享文字：方框 + 字母形（横杠 + 中竖）
+                Item {
+                    id: shareTextAction
+                    width: 14
+                    height: 14
+
+                    readonly property color iconColor: shareTextHover.hovered ? Theme.text : Theme.textFaint
+
+                    Rectangle {
+                        x: 1.5; y: 3; width: 11; height: 9
+                        color: "transparent"
+                        border.width: 1.2
+                        border.color: shareTextAction.iconColor
+                    }
+                    Rectangle {
+                        x: 4.4; y: 5.6; width: 5; height: 1.1
+                        color: shareTextAction.iconColor
+                    }
+                    Rectangle {
+                        x: 6.5; y: 5.6; width: 1.1; height: 3.6
+                        color: shareTextAction.iconColor
+                    }
+
+                    HoverHandler { id: shareTextHover }
+
+                    TapHandler {
+                        cursorShape: Qt.PointingHandCursor
+                        onTapped: {
+                            page.copyText(wrapper.content)
+                            wrapper.copied = true
+                            copyTimer.restart()
+                        }
+                    }
+
+                    ToolTip {
+                        id: shareTextTip
+                        delay: 600
+                        visible: shareTextHover.hovered
+                        text: qsTr("分享文字")
+                        x: Math.round((shareTextAction.width - width) / 2)
+                        y: -height - 6
+                        padding: 6
+                        background: Rectangle {
+                            radius: Theme.rSm
+                            color: Theme.ink3
+                            border.width: 1
+                            border.color: Theme.hairlineStrong
+                        }
+                        contentItem: Text {
+                            text: shareTextTip.text
+                            color: Theme.text
+                            font.pixelSize: Theme.fLabel
+                        }
+                    }
+                }
+
+                // 分享图片：方框 + 山形（两根旋转矩形拼成山峰，加一枚方形太阳）
+                Item {
+                    id: shareImageAction
+                    width: 14
+                    height: 14
+
+                    readonly property color iconColor: shareImageHover.hovered ? Theme.text : Theme.textFaint
+
+                    Rectangle {
+                        x: 1.5; y: 3; width: 11; height: 9
+                        color: "transparent"
+                        border.width: 1.2
+                        border.color: shareImageAction.iconColor
+                    }
+                    Rectangle {
+                        x: 3.8; y: 5.25
+                        width: 1.1; height: 4.5
+                        color: shareImageAction.iconColor
+                        rotation: 45
+                        transformOrigin: Item.Center
+                    }
+                    Rectangle {
+                        x: 7.1; y: 5.25
+                        width: 1.1; height: 4.5
+                        color: shareImageAction.iconColor
+                        rotation: -45
+                        transformOrigin: Item.Center
+                    }
+                    Rectangle {
+                        x: 3.6; y: 4.6; width: 1.8; height: 1.8
+                        color: shareImageAction.iconColor
+                    }
+
+                    HoverHandler { id: shareImageHover }
+
+                    TapHandler {
+                        cursorShape: Qt.PointingHandCursor
+                        onTapped: page.shareImage(bubble)
+                    }
+
+                    ToolTip {
+                        id: shareImageTip
+                        delay: 600
+                        visible: shareImageHover.hovered
+                        text: qsTr("分享图片")
+                        x: Math.round((shareImageAction.width - width) / 2)
+                        y: -height - 6
+                        padding: 6
+                        background: Rectangle {
+                            radius: Theme.rSm
+                            color: Theme.ink3
+                            border.width: 1
+                            border.color: Theme.hairlineStrong
+                        }
+                        contentItem: Text {
+                            text: shareImageTip.text
+                            color: Theme.text
+                            font.pixelSize: Theme.fLabel
+                        }
+                    }
+                }
+
+                // 图标组与文本之间留一段间距（不用「·」）
+                Rectangle {
+                    width: Theme.s2
+                    height: 1
+                    color: "transparent"
+                }
+
+                Text {
+                    text: qsTr("Token %1").arg(wrapper.totalTokens < 0 ? "—"
+                                                                      : wrapper.totalTokens)
+                    color: Theme.textGhost
+                    font.pixelSize: Theme.fSmall
+                }
+
+                Text {
+                    text: "·"
+                    color: Theme.textGhost
+                    font.pixelSize: Theme.fSmall
+                }
+
+                Text {
+                    text: qsTr("耗时 %1").arg(wrapper.elapsedMs < 0
+                                              ? "—"
+                                              : qsTr("%1 秒").arg((wrapper.elapsedMs / 1000).toFixed(1)))
+                    color: Theme.textGhost
+                    font.pixelSize: Theme.fSmall
                 }
             }
         }
@@ -1351,12 +1342,13 @@ Item {
         visible: transcriptView.count === 0 && !Chat.busy
         enabled: false
 
-        EyeMark {
+        BrandLogo {
             anchors.horizontalCenter: parent.horizontalCenter
             anchors.verticalCenter: parent.verticalCenter
             anchors.verticalCenterOffset: -48
             width: 56
             height: 56
+            markOnly: true
             opacity: 0.4
         }
 
@@ -1380,6 +1372,32 @@ Item {
             color: Theme.textGhost
             font.pixelSize: Theme.fSmall
         }
+    }
+
+    // 剪贴板落点：隐藏的 TextEdit 提供 copy()，不在 QML 里直连平台剪贴板
+    TextEdit {
+        id: clipHelper
+        visible: false
+        width: 0
+        height: 0
+        textFormat: TextEdit.PlainText
+    }
+
+    // 分享图片：保存对话框；确认后把 grabToImage 的结果写成 PNG
+    FileDialog {
+        id: saveImageDialog
+        title: qsTr("保存消息图片")
+        fileMode: FileDialog.SaveFile
+        defaultSuffix: "png"
+        nameFilters: [qsTr("PNG 图片 (*.png)")]
+
+        onAccepted: {
+            if (page.pendingMessageImage) {
+                page.pendingMessageImage.saveToFile(page.localPath(saveImageDialog.selectedFile))
+                page.pendingMessageImage = null
+            }
+        }
+        onRejected: page.pendingMessageImage = null
     }
 
     // 资料库首次启用 / 内容外发同意：只在用户点「挂载」且尚未同意时出现

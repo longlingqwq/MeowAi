@@ -46,6 +46,16 @@ class EmbeddingService : public QObject
     Q_OBJECT
 
 public:
+    /// 校验状态：供资料库设置页绑定
+    enum ValidationStatus {
+        Idle,
+        Checking,
+        Valid,
+        Invalid,
+        Unverifiable,
+    };
+    Q_ENUM(ValidationStatus)
+
     /// transport 为空时自建 `QNetworkTransport`（父对象为本对象）；注入时所有权归调用方
     explicit EmbeddingService(NetworkTransport *transport = nullptr, QObject *parent = nullptr);
 
@@ -63,9 +73,31 @@ public:
     /// 中断在途批次并清空剩余（回 `Cancelled`）
     void cancel();
 
+    /**
+     * 显式校验当前配置：发一次单条 "ping" 的 embedding 请求。
+     *
+     * 只读配置、不写库、不改索引状态；校验期间重复调用直接忽略。
+     * 结论经 `validationChanged` 通知，失败原因固定为中文、绝不含 Key/请求体。
+     */
+    void validateConfig();
+    /// 配置变更后把结论复位为 idle（避免旧结论误导）
+    void resetValidation();
+    QString validationStatus() const;
+    QString validationMessage() const;
+
+    /**
+     * 拉取当前厂商的模型清单（`GET {baseUrl}/models`）。
+     * 与 `embed()` 独立：不进入向量化队列，不改变索引状态。
+     */
+    void fetchModels();
+
 signals:
     void finished(const EmbeddingResult &result);
     void failed(const ChatError &error);
+
+    void validationChanged();
+    /// 拉取完成：ids 为空时 error 必为明确中文原因；成功时 error 为空
+    void modelsFetched(const QStringList &ids, const QString &error);
 
 private:
     void issueNextBatch();
@@ -76,6 +108,12 @@ private:
     void finishSuccess();
     /// 解析一批响应；失败时写 error 并返回 false
     bool parseBatch(const QByteArray &body, int expectedCount, QString *error);
+
+    void setValidation(ValidationStatus status, const QString &message);
+    void finishValidationSuccess(const QByteArray &body);
+    void failValidation(int httpStatus, NetworkTransport::Failure failure);
+    void finishModelsFetch(const QByteArray &body);
+    void failModelsFetch(int httpStatus, NetworkTransport::Failure failure);
 
     NetworkTransport *m_transport = nullptr;
     ProviderConfig m_provider;
@@ -89,4 +127,11 @@ private:
     QList<QVector<float>> m_vectors;
     ChatUsage m_usage;
     int m_dimensions = 0;
+
+    ValidationStatus m_validationStatus = Idle;
+    QString m_validationMessage;
+    int m_validationHandle = 0;
+    QByteArray m_validationBody;
+    int m_modelsHandle = 0;
+    QByteArray m_modelsBody;
 };

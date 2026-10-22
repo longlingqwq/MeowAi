@@ -144,9 +144,10 @@ Item {
             anchors.bottomMargin: Theme.s3
             spacing: Theme.s2
 
-            EyeMark {
+            BrandLogo {
                 width: 22
                 height: 22
+                markOnly: true
                 anchors.verticalCenter: parent.verticalCenter
             }
 

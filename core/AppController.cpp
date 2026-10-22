@@ -33,12 +33,20 @@
 #include "storage/WebConfigStore.h"
 
 #include <QCoreApplication>
+#include <QDateTime>
+#include <QDesktopServices>
 #include <QDir>
+#include <QFileInfo>
+#include <QStringList>
+#include <QUrl>
 
 namespace {
 
 /// 主题预设内嵌在可执行程序资源里，core 只按路径读取，不感知 qrc 细节
 constexpr auto kThemePresetRoot = ":/themes";
+
+/// 开发环境向上找仓库根的最大层数（构建目录通常位于 build/ 或 build/Debug/）
+constexpr int kDevRootSearchDepth = 5;
 
 } // namespace
 
@@ -69,6 +77,65 @@ bool AppController::customTitleBar() const
 QString AppController::statusMessage() const
 {
     return m_statusMessage;
+}
+
+bool AppController::userGuideAvailable() const
+{
+    return m_userGuideAvailable;
+}
+
+QString AppController::locateUserGuide() const
+{
+    // 1) 安装包内：程序目录 docs/USER_GUIDE.md；2) 程序目录根 USER_GUIDE.md
+    const QDir appDir(QCoreApplication::applicationDirPath());
+    const QStringList packaged = {
+        appDir.filePath(QStringLiteral("docs/USER_GUIDE.md")),
+        appDir.filePath(QStringLiteral("USER_GUIDE.md")),
+    };
+    for (const QString &candidate : packaged) {
+        if (QFileInfo::exists(candidate)) {
+            return candidate;
+        }
+    }
+
+    // 3) 开发环境：从可执行文件目录向上找同时含 CMakeLists.txt 与 docs/USER_GUIDE.md 的仓库根
+    QDir cursor(appDir);
+    for (int level = 0; level < kDevRootSearchDepth; ++level) {
+        if (!cursor.cdUp()) {
+            break;
+        }
+        if (!QFileInfo::exists(cursor.filePath(QStringLiteral("CMakeLists.txt")))) {
+            continue;
+        }
+        const QString candidate = cursor.filePath(QStringLiteral("docs/USER_GUIDE.md"));
+        if (QFileInfo::exists(candidate)) {
+            return candidate;
+        }
+    }
+    return QString();
+}
+
+bool AppController::openUserGuide()
+{
+    const QString path = locateUserGuide();
+    const bool available = !path.isEmpty();
+    if (available != m_userGuideAvailable) {
+        m_userGuideAvailable = available;
+        emit userGuideAvailabilityChanged();
+    }
+    if (!available) {
+        return false;
+    }
+    return QDesktopServices::openUrl(QUrl::fromLocalFile(path));
+}
+
+QString AppController::avatarCropTempUrl()
+{
+    // 只提供临时落点，不做图像处理：QML 渲染 512×512 PNG 后交给 Personalize.setAvatar
+    const QString fileName = QStringLiteral("meowai-avatar-%1-%2.png")
+                                 .arg(QDateTime::currentMSecsSinceEpoch())
+                                 .arg(++m_avatarCropSeq);
+    return QUrl::fromLocalFile(QDir(QDir::tempPath()).filePath(fileName)).toString();
 }
 
 ThemeManager *AppController::themeManager() const
@@ -143,6 +210,9 @@ LibraryController *AppController::libraryController() const
 
 void AppController::initialize()
 {
+    // 手册可用性：启动时检测一次（QML 在引擎加载前读取本属性）
+    m_userGuideAvailable = !locateUserGuide().isEmpty();
+
     if (!m_platform) {
         setStatusMessage(QStringLiteral("平台适配器不可用，应用以受限模式启动"));
         return;

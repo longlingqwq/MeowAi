@@ -8,3 +8,8 @@ AiProvider::AiProvider(QObject *parent)
     qRegisterMetaType<ChatResponse>("ChatResponse");
     qRegisterMetaType<AiProvider::Protocol>("AiProvider::Protocol");
 }
+
+void AiProvider::fetchModelsForService()
+{
+    emit modelsFetched(QStringList(), QStringLiteral("该厂商不支持动态拉取模型清单"));
+}

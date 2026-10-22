@@ -17,6 +17,8 @@ struct LibraryEmbeddingConfig
 {
     QString providerId;  ///< 复用厂商 id；为空表示尚未配置
     QString modelId;
+    /// 本服务专用的 API 地址；为空表示按优先级回退到对话自定义地址 / catalog 默认地址
+    QString baseUrl;
     int dimensions = 0;  ///< 0 = 使用模型默认维度
     int batchSize = 16;  ///< 单次请求的文本条数（受厂商批量上限约束，M4 内再按厂商裁剪）
 };
@@ -26,6 +28,8 @@ struct LibraryCaptionConfig
 {
     QString providerId;
     QString modelId;
+    /// 本服务专用的 API 地址；为空表示按优先级回退到对话自定义地址 / catalog 默认地址
+    QString baseUrl;
     int maxEdge = 1536;  ///< 图片长边压缩上限：显著降低视觉 token 消耗
     int maxTokens = 500;
     QString promptProfile = QStringLiteral("default");

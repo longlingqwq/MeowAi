@@ -61,6 +61,17 @@ public:
      */
     virtual void fetchModels() = 0;
 
+    /**
+     * 为「资料库服务」（embedding / caption）拉取模型清单。
+     *
+     * 与 `fetchModels()` 的区别：**忽略 catalog 的 validationMethod**，一律尝试
+     * `GET {baseUrl}/models`。资料库允许用户选择非对话用途的厂商（如 chat-minimal），
+     * 是否支持 `/models` 由实际响应决定，因此不能沿用聊天侧的静态判断。
+     * 失败语义同 `fetchModels()`：空列表 + 明确原因，绝不抛异常。
+     * 默认实现直接回「该厂商不支持动态拉取模型清单」。
+     */
+    virtual void fetchModelsForService();
+
 signals:
     void chatDelta(const QString &delta);             ///< 流式分片（增量文本）
     void chatFinished(const ChatResponse &response);  ///< 完整结果（成功）

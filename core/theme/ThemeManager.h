@@ -44,6 +44,7 @@ public:
     QString backgroundSource() const;
     QString avatarSource() const;
     QString splashSource() const;
+    /// 是否在启动时播放开屏（内置开屏默认开启）
     bool splashEnabled() const;
     void setSplashEnabled(bool enabled);
     bool splashSoundEnabled() const;
@@ -71,6 +72,7 @@ public:
     Q_INVOKABLE bool clearFont();
     Q_INVOKABLE bool clearBackground();
     Q_INVOKABLE bool clearAvatar();
+    /// 清除自定义开屏视频；开屏开关保持不变，splashSource 为空时回落到内置开屏
     Q_INVOKABLE bool clearSplash();
     /// 恢复全部默认外观，并清理已导入的资源文件
     Q_INVOKABLE bool resetAll();

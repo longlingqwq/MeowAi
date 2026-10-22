@@ -53,7 +53,8 @@ PersonalizationConfig fromJson(const QJsonObject &section, QString *warning)
     config.avatarSource = readPath(section, kKeyAvatar, warning);
     config.splashSource = readPath(section, kKeySplash, warning);
     config.fontFamily = readString(section, kKeyFontFamily);
-    config.splashEnabled = section.value(kKeySplashEnabled).toBool(false);
+    // 内置开屏默认开启：旧配置缺键时也按 true 处理
+    config.splashEnabled = section.value(kKeySplashEnabled).toBool(true);
     config.splashSoundEnabled = section.value(kKeySplashSound).toBool(true);
     return config;
 }

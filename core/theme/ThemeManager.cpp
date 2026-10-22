@@ -436,13 +436,11 @@ bool ThemeManager::clearSplash()
         return false;
     }
 
+    // 只清除自定义视频，保留开屏开关：splashSource 为空时自动回落到内置开屏
     const QString previousSource = m_config.splashSource;
-    const bool previousEnabled = m_config.splashEnabled;
     m_config.splashSource.clear();
-    m_config.splashEnabled = false;
     if (!persist()) {
         m_config.splashSource = previousSource;
-        m_config.splashEnabled = previousEnabled;
         return false;
     }
     removeAsset(previousSource);

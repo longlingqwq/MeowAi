@@ -158,7 +158,8 @@ QList<MessageRecord> ChatStore::messages(qint64 conversationId, QString *error) 
     }
 
     QSqlQuery query(m_database->handle());
-    query.prepare(QStringLiteral("SELECT id, conversation_id, role, content, status, created_at"
+    query.prepare(QStringLiteral("SELECT id, conversation_id, role, content, status, created_at,"
+                                 " total_tokens, prompt_tokens, completion_tokens, elapsed_ms"
                                  " FROM messages WHERE conversation_id = ? ORDER BY id ASC"));
     query.addBindValue(conversationId);
     if (!query.exec()) {
@@ -174,6 +175,10 @@ QList<MessageRecord> ChatStore::messages(qint64 conversationId, QString *error) 
         record.content = query.value(3).toString();
         record.status = query.value(4).toString();
         record.createdAt = query.value(5).toLongLong();
+        record.totalTokens = query.value(6).toInt();
+        record.promptTokens = query.value(7).toInt();
+        record.completionTokens = query.value(8).toInt();
+        record.elapsedMs = query.value(9).toLongLong();
         result.append(record);
     }
     return result;
@@ -188,13 +193,18 @@ bool ChatStore::appendMessage(const MessageRecord &record, qint64 *newId, QStrin
 
     QSqlQuery query(m_database->handle());
     query.prepare(QStringLiteral(
-        "INSERT INTO messages (conversation_id, role, content, status, created_at)"
-        " VALUES (?, ?, ?, ?, ?)"));
+        "INSERT INTO messages (conversation_id, role, content, status, created_at,"
+        " total_tokens, prompt_tokens, completion_tokens, elapsed_ms)"
+        " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"));
     query.addBindValue(record.conversationId);
     query.addBindValue(nonNullText(record.role));
     query.addBindValue(nonNullText(record.content));
     query.addBindValue(nonNullText(record.status));
     query.addBindValue(record.createdAt > 0 ? record.createdAt : nowMillis());
+    query.addBindValue(record.totalTokens);
+    query.addBindValue(record.promptTokens);
+    query.addBindValue(record.completionTokens);
+    query.addBindValue(record.elapsedMs);
     if (!query.exec()) {
         setError(error, QStringLiteral("写入消息失败：%1").arg(query.lastError().text()));
         return false;
@@ -220,6 +230,47 @@ bool ChatStore::updateMessage(qint64 messageId, const QString &content, const QS
     query.addBindValue(messageId);
     if (!query.exec()) {
         setError(error, QStringLiteral("更新消息失败：%1").arg(query.lastError().text()));
+        return false;
+    }
+    return true;
+}
+
+bool ChatStore::updateMessageUsage(qint64 messageId, int totalTokens, int promptTokens,
+                                   int completionTokens, qint64 elapsedMs, QString *error) const
+{
+    if (!isAvailable()) {
+        setError(error, QStringLiteral("数据库不可用，无法更新消息用量"));
+        return false;
+    }
+
+    QSqlQuery query(m_database->handle());
+    query.prepare(QStringLiteral(
+        "UPDATE messages SET total_tokens = ?, prompt_tokens = ?, completion_tokens = ?,"
+        " elapsed_ms = ? WHERE id = ?"));
+    query.addBindValue(totalTokens);
+    query.addBindValue(promptTokens);
+    query.addBindValue(completionTokens);
+    query.addBindValue(elapsedMs);
+    query.addBindValue(messageId);
+    if (!query.exec()) {
+        setError(error, QStringLiteral("更新消息用量失败：%1").arg(query.lastError().text()));
+        return false;
+    }
+    return true;
+}
+
+bool ChatStore::removeMessage(qint64 messageId, QString *error) const
+{
+    if (!isAvailable()) {
+        setError(error, QStringLiteral("数据库不可用，无法删除消息"));
+        return false;
+    }
+
+    QSqlQuery query(m_database->handle());
+    query.prepare(QStringLiteral("DELETE FROM messages WHERE id = ?"));
+    query.addBindValue(messageId);
+    if (!query.exec()) {
+        setError(error, QStringLiteral("删除消息失败：%1").arg(query.lastError().text()));
         return false;
     }
     return true;

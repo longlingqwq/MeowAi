@@ -31,6 +31,16 @@ class ImageCaptionService : public QObject
     Q_OBJECT
 
 public:
+    /// 校验状态：供资料库设置页绑定
+    enum ValidationStatus {
+        Idle,
+        Checking,
+        Valid,
+        Invalid,
+        Unverifiable,
+    };
+    Q_ENUM(ValidationStatus)
+
     explicit ImageCaptionService(AiProvider *provider, QObject *parent = nullptr);
 
     /// caption 运行参数（长边上限 / 最大输出 token / 提示词档位），直接复用资料库配置
@@ -56,6 +66,19 @@ public:
     /// 清空队列并中断在途请求（在途请求会以 `Cancelled` 回传，供上层标记待索引）
     void cancelAll();
 
+    /**
+     * 显式校验当前视觉模型：发送一张内置 8×8 PNG 与短提示，校验返回非空文本。
+     *
+     * 只读配置、不写库、不改索引状态；**绕过图片外发同意开关**，因为这是用户主动点击的
+     * 单次极小请求（调用方 UI 必须提示可能产生极小费用）。图片描述队列繁忙或校验中时
+     * 直接忽略/回「无法判定」，绝不打断在途描述。
+     */
+    void validateConfig();
+    /// 配置变更后把结论复位为 idle
+    void resetValidation();
+    QString validationStatus() const;
+    QString validationMessage() const;
+
 signals:
     /// 成功：`caption` 为模型返回的可入库文本（已 trim）
     void captionReady(qint64 fileId, int imageOrdinal, const QString &caption, const ChatUsage &usage);
@@ -63,6 +86,7 @@ signals:
     void captionFailed(qint64 fileId, const ChatError &error);
     /// 队列处理完毕（成功或失败均计）；`cancelAll()` 清空队列时也会触发
     void queueDrained();
+    void validationChanged();
 
 private slots:
     void processNext();
@@ -79,6 +103,9 @@ private:
 
     void failCurrent(const ChatError &error);
     void finishCurrent();
+    void setValidation(ValidationStatus status, const QString &message);
+    void finishValidation(const ChatResponse &response);
+    void failValidation(const ChatError &error);
 
     AiProvider *m_provider = nullptr;
     LibraryCaptionConfig m_caption;  ///< 默认 maxEdge = 1536（`LibraryCaptionConfig` 默认值）
@@ -87,4 +114,8 @@ private:
     QQueue<Item> m_queue;
     Item m_current;
     bool m_busy = false;
+
+    bool m_validating = false;
+    ValidationStatus m_validationStatus = Idle;
+    QString m_validationMessage;
 };

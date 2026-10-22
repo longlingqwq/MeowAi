@@ -31,8 +31,11 @@ public:
     void cancel() override;
     void validateCredentials() override;
     void fetchModels() override;
+    void fetchModelsForService() override;
 
 private:
+    /// 真正发起 `GET /models`；聊天侧与服务侧共用，前置校验由调用方负责
+    void requestModels();
     bool buildBody(const ChatRequest &request, QJsonObject *body, QString *error) const;
     bool processStreamEvent(const SseEvent &event);
     void handleChunk(int handle, const QByteArray &chunk);

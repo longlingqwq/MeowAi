@@ -46,6 +46,9 @@ meowai_add_test(tst_embedding)
 meowai_add_test(tst_ragretriever)
 meowai_add_test(tst_cost)
 meowai_add_test(tst_referencemode)
+meowai_add_test(tst_libraryservices)
+meowai_add_test(tst_chatfeatures)
+meowai_add_test(tst_libraryurls)
 
 # 解析器用例会真跑 PDF 文本层：pdfium.dll 是运行期动态库，需与测试可执行文件同目录
 if(TARGET pdfium)
@@ -60,3 +63,7 @@ endif()
 target_compile_definitions(tst_providercatalog PRIVATE MEOWAI_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 # 成本预估测试同样读取源码树里的 resources/pricing.json（不依赖 qrc）
 target_compile_definitions(tst_cost PRIVATE MEOWAI_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+# 对话能力用例需要读取源码树的 resources/providers.json（自定义厂商拉取模型）
+target_compile_definitions(tst_chatfeatures PRIVATE MEOWAI_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+# 资料库地址优先级用例同样需要 catalog 数据；Qt Gui 用于构造内置 8x8 PNG
+target_compile_definitions(tst_libraryurls PRIVATE MEOWAI_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
