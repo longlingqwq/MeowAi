@@ -2,7 +2,7 @@
 
 本地优先的 Windows 桌面 AI 助理客户端。对话、资料库、模型配置都在本机完成，文件不出本地，密钥只存在自己的电脑上。
 
-当前版本：**v0.2.7**
+当前版本：**v0.2.7.1**
 
 ## 这是什么
 
@@ -18,7 +18,7 @@ MeowAi 把“和大模型对话”和“查自己的文档”放在同一个窗�
 
 ## 快速开始（普通用户）
 
-1. 运行安装包 `MeowAi-Setup-0.2.7.exe`。按当前用户安装到 `%LOCALAPPDATA%\Programs\MeowAi`，不需要管理员权限。
+1. 运行安装包 `MeowAi-Setup-0.2.7.1.exe`。按当前用户安装到 `%LOCALAPPDATA%\Programs\MeowAi`，不需要管理员权限。
 2. 首次运行会播放内置开屏动画，可点右上角“跳过”。
 3. 打开次顶部 Dock 的“配置”，填入厂商、模型与 API Key，点“验证”确认可用。
 4. 进入“资料库”导入文件，在右侧配置抽屉里设置 embedding 模型，等索引完成后即可在对话中引用。
@@ -212,7 +212,7 @@ windeployqt --release --qmldir ui --compiler-runtime <发布目录>\MeowAi.exe
 
 ## 版本
 
-当前版本 `v0.2.7`，对应分支 `v0.2.7`。版本变更明细见 [docs/DEVELOPER_GUIDE.md](docs/DEVELOPER_GUIDE.md) 的版本记录章节。
+当前版本 `v0.2.7.1`，对应分支 `v0.2.7.1`。版本变更明细见 [docs/DEVELOPER_GUIDE.md](docs/DEVELOPER_GUIDE.md) 的版本记录章节。
 
 ## 已知限制
 

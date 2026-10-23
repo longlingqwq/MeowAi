@@ -246,7 +246,7 @@ void TestTheme::importOversizeRejected()
     const QString source = dir.filePath(QStringLiteral("huge.png"));
     QFile big(source);
     QVERIFY(big.open(QIODevice::WriteOnly));
-    QVERIFY(big.resize(21 * 1024 * 1024)); // 超过 20 MB 上限
+    QVERIFY(big.resize(129 * 1024 * 1024)); // 超过 128 MB 图片上限
     big.close();
 
     PersonalizationStore store(paths.configFile());

@@ -85,10 +85,7 @@ bool OfficeZipArchive::open(const QString &path, QString *error)
         setError(error, QStringLiteral("文件不存在或不是普通文件：%1").arg(path));
         return false;
     }
-    if (info.size() > kMaxExtractBytes) {
-        setError(error, QStringLiteral("文件过大（%1 MB），超出单次解析上限 %2 MB")
-                            .arg(info.size() / (1024 * 1024))
-                            .arg(kMaxExtractBytes / (1024 * 1024)));
+    if (!validateExtractSize(info.size(), error)) {
         return false;
     }
 

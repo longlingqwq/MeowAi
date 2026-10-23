@@ -34,19 +34,33 @@ Window {
     minimumHeight: Math.min(560, Math.max(420, screenH - 40))
     visible: true
     title: App.appName + " · " + App.platformId
-    // 透明底 + 内部遮罩裁剪出圆角；系统原生边框与投影已由无边框自绘标题栏放弃
+    // 必须保持透明：窗口颜色会填满整块矩形，圆角遮罩之外的四角会露出这层底色，
+    // 开屏底色由 stageRoot 内部的底板负责（会被圆角遮罩一起裁剪）。
     color: "transparent"
 
     /// 屏幕可用区域很小时直接最大化：由系统按真实工作区计算，避免底部超出屏幕
     Component.onCompleted: {
         if (screenW < 1200 || screenH < 820)
             visibility = Window.Maximized
+        // 不开开屏时首帧即显示主内容
+        if (!root.splashLayerVisible) {
+            root.mainOpacity = 1
+            root.mainRevealed = true
+        }
     }
 
     // 切换显示器/远程桌面时把窗口收回可视区域
     Connections {
         target: root
         function onScreenChanged() { root.clampToScreen() }
+    }
+
+    /// 离开某页时同步收起该页专属面板：配置抽屉只属于资料库页
+    onPageIndexChanged: {
+        if (pageIndex !== 0)
+            conversationConfigOpen = false
+        if (pageIndex !== 2)
+            libraryConfigOpen = false
     }
 
     /// 把窗口收回到当前屏幕内（远程桌面/投屏切换分辨率后也能自动恢复）
@@ -76,11 +90,71 @@ Window {
     property bool splashConsumed: false
     /// 是否为「手动预览」触发的一次播放
     property bool previewing: false
+    /// 启动阶段是否必须先播放开屏（预览，或首次启动且设置开启）
+    readonly property bool startupSplashActive: !previewing && !splashConsumed && Personalize.splashEnabled
+    /// 开屏层是否可见：预览与启动开屏共用同一个覆盖层
+    readonly property bool splashLayerVisible: previewing || startupSplashActive
+    /// 主内容层透明度：开屏期间为 0，交叉淡化结束后置 1
+    property real mainOpacity: 0
+    /// 主内容层是否已开放交互：开屏结束前为 false
+    property bool mainRevealed: false
+    /// 开屏配色：与 SplashIntro 的版本映射保持一致（未知主题按亮度兜底）
+    readonly property bool splashAmber: {
+        const id = ThemePreset.currentPresetId;
+        if (id === "theme1")
+            return true;
+        if (id === "theme2")
+            return false;
+        return (Theme.ink0.r * 0.2126 + Theme.ink0.g * 0.7152 + Theme.ink0.b * 0.0722) < 0.5;
+    }
+    /// 构建期窗口底色：内置开屏用品牌底色，自定义视频开屏用黑底
+    readonly property color splashBackdropColor: Personalize.splashSource !== ""
+                                                  ? "#000000"
+                                                  : (splashAmber ? "#0B0D12" : "#FFFFFF")
     /// 自绘标题栏高度：非桌面端为 0，此时内容整体上移
     readonly property int titleBarHeight: App.customTitleBar ? 38 : 0
     /// 窗口圆角：最大化 / 全屏时归零，避免与工作区边界冲突
     readonly property int stageRadius: (visibility === Window.Maximized
                                         || visibility === Window.FullScreen) ? 0 : Theme.rLg
+
+    /// 开屏收尾：跳过与自然结束共用同一条路径——350ms 同曲线交叉淡化
+    function crossfadeOutSplash() {
+        if (splashCrossfade.running)
+            return
+        splashLoader.opacity = 1
+        splashCrossfade.start()
+    }
+
+    /// 交叉淡化结束后才卸载开屏层并开放主内容交互
+    function finishSplash() {
+        previewing = false
+        splashConsumed = true
+        mainOpacity = 1
+        mainRevealed = true
+        splashLoader.opacity = 1
+    }
+
+    ParallelAnimation {
+        id: splashCrossfade
+
+        NumberAnimation {
+            target: splashLoader
+            property: "opacity"
+            to: 0
+            duration: 350
+            easing.type: Theme.easeInOut
+        }
+
+        NumberAnimation {
+            target: root
+            property: "mainOpacity"
+            to: 1
+            duration: 350
+            easing.type: Theme.easeInOut
+        }
+
+        onFinished: root.finishSplash()
+    }
 
     // 圆角裁剪容器：Rectangle 的 radius 不会裁剪子项，必须用 MultiEffect 遮罩，
     // 否则四角只会被背景色盖住、而不是真正透出桌面。
@@ -144,8 +218,12 @@ Window {
         }
 
         // ================================================================= 前景
+        // 主内容层：开屏期间整层透明且不可交互，数据绑定与模型加载照常进行
         Item {
+            id: mainLayer
             anchors.fill: parent
+            opacity: root.mainOpacity
+            enabled: root.mainRevealed
 
             // ------------------------------------------------ 自绘标题栏（阶段三）
             TitleBar {
@@ -180,7 +258,11 @@ Window {
                 }
                 onNavCollapsedRequested: (collapsed) => root.navCollapsed = collapsed
                 onConversationExpandedRequested: (expanded) => root.conversationExpanded = expanded
-                onNewConversationRequested: History.newConversation()
+                // 新建对话直接切回对话页；先切页再装载，保证停在新会话上
+                onNewConversationRequested: {
+                    root.pageIndex = 0
+                    History.newConversation()
+                }
             }
 
             // ------------------------------------------------ 右侧内容区
@@ -306,6 +388,7 @@ Window {
                                 root.splashConsumed = false
                                 root.previewing = true
                             }
+                            onToastRequested: (message, isError) => toastLayer.showToast(message, isError)
                         }
                     }
 
@@ -314,6 +397,7 @@ Window {
 
                         LibraryPage {
                             anchors.fill: parent
+                            onToastRequested: (message, isError) => toastLayer.showToast(message, isError)
                         }
                     }
                 }
@@ -353,6 +437,9 @@ Window {
                     anchors.bottom: parent.bottom
                     width: Math.min(440, drawerLayer.width - Theme.s7)
                     x: root.libraryConfigOpen ? drawerLayer.width - width : drawerLayer.width
+                    // 关闭态不渲染：侧栏宽度动画会让 x 目标随 drawerLayer.width 变化，
+                    // 仅靠“移到视口右侧”会被动画滞后扯回视口，露出一条抽屉边缘。
+                    visible: root.libraryConfigOpen
                     color: Theme.ink2
                     border.width: 1
                     border.color: Theme.hairlineStrong
@@ -361,6 +448,8 @@ Window {
                     bottomLeftRadius: Theme.rLg
 
                     Behavior on x {
+                        // 只在打开时做滑入；关闭态侧栏宽度变化直接落到视口外，不产生动画滞后
+                        enabled: root.libraryConfigOpen
                         NumberAnimation {
                             duration: Theme.dBase
                             easing.type: Theme.easeInOut
@@ -425,6 +514,99 @@ Window {
                 sequence: "Esc"
                 enabled: root.libraryConfigOpen
                 onActivated: root.libraryConfigOpen = false
+            }
+
+            // ------------------------------------------------ Toast 宿主（M15）
+            // 唯一实例：页面只发信号，不各自持有 Toast。位置固定在内容区顶部，
+            // 不压标题栏与次顶部 Dock；资料库抽屉打开时把可用宽度让给抽屉左侧。
+            Item {
+                id: toastLayer
+                anchors.left: sidebar.right
+                anchors.right: parent.right
+                anchors.rightMargin: root.libraryConfigOpen
+                                    ? Math.min(440, drawerLayer.width - Theme.s7) : 0
+                anchors.top: titleBar.bottom
+                anchors.topMargin: topBar.height + Theme.s4
+                height: toastColumn.height
+                z: 650
+
+                /// 抽屉打开或窗口变窄时同步收窄，避免 Toast 压到抽屉上
+                readonly property int toastMaxWidth: Math.max(120,
+                    Math.min(560, width - Theme.s4 * 2))
+
+                property string lastToastText: ""
+                property double lastToastAt: 0
+
+                /**
+                 * 页面统一入口：空文案兜底为「操作失败，请重试」；
+                 * 相同文案 2 秒内不新增，只重置计时并轻闪；
+                 * 同时最多 3 条，新条插到最上方，超出时挤掉最旧的一条。
+                 */
+                function showToast(message, isError) {
+                    var text = (message === undefined || message === null)
+                             ? "" : String(message).trim()
+                    if (text.length === 0)
+                        text = qsTr("操作失败，请重试")
+
+                    const now = Date.now()
+                    if (text === lastToastText && now - lastToastAt <= 2000) {
+                        for (let i = 0; i < toastModel.count; ++i) {
+                            if (toastModel.get(i).toastText !== text)
+                                continue
+                            const delegate = toastRepeater.itemAt(i)
+                            if (delegate && !delegate.closing) {
+                                delegate.restart(true)
+                                lastToastAt = now
+                                return
+                            }
+                        }
+                    }
+
+                    if (toastModel.count >= 3)
+                        toastModel.remove(toastModel.count - 1)
+                    toastModel.insert(0, { "toastText": text, "toastError": !!isError })
+                    lastToastText = text
+                    lastToastAt = now
+                }
+
+                ListModel { id: toastModel }
+
+                Column {
+                    id: toastColumn
+                    anchors.top: parent.top
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    spacing: Theme.s2
+
+                    Repeater {
+                        id: toastRepeater
+                        model: toastModel
+                        delegate: MToast {
+                            required property int index
+                            required property string toastText
+                            required property bool toastError
+
+                            maxWidth: toastLayer.toastMaxWidth
+                            message: toastText
+                            isError: toastError
+                            onClosed: toastModel.remove(index)
+                        }
+                    }
+                }
+
+                // 切页即清空：上一页的文件错误不在新页面上残留
+                Connections {
+                    target: root
+                    function onPageIndexChanged() { toastModel.clear() }
+                }
+            }
+
+            // ------------------------------------------------ 会话激活接线（任务 1）
+            // Sidebar 内部的会话列表直接调用 History.openConversation()，外壳拿不到该点击信号；
+            // ConversationChanged 在 loadRows() 末尾发出，此时消息已装载完毕，再切回对话页，
+            // 因此最终一定停在对话页且消息可见。切页只改视图，不触碰 Chat，不打断流式回答。
+            Connections {
+                target: History
+                function onConversationChanged() { root.pageIndex = 0 }
             }
 
             // ------------------------------------------------ 无边框窗口缩放边框
@@ -513,14 +695,24 @@ Window {
         }
 
         // ================================================================= 开屏
+        // 开屏底板：把舞台背景一起盖住，构建期与播放期都保持品牌底色（视频开屏为黑底），
+        // 交叉淡化时与开屏层同步淡出，不会出现硬切。
+        Rectangle {
+            anchors.fill: parent
+            color: root.splashBackdropColor
+            visible: root.splashLayerVisible
+            opacity: splashLoader.opacity
+        }
+
         Loader {
             id: splashLoader
             anchors.fill: parent
             // 用户设置过自定义开屏视频走视频开屏；否则按当前主题播放内置开屏
             source: Personalize.splashSource !== "" ? "SplashVideo.qml" : "SplashIntro.qml"
+            // 同步创建：窗口首帧就只有开屏层，不会先露出主界面再叠上来
+            asynchronous: false
             visible: active
-            active: root.previewing
-                    || (!root.splashConsumed && Personalize.splashEnabled)
+            active: root.splashLayerVisible
         }
     }
 
@@ -539,9 +731,7 @@ Window {
         target: splashLoader.item
         ignoreUnknownSignals: true
 
-        function onFinished() {
-            root.previewing = false
-            root.splashConsumed = true
-        }
+        // 自然结束与点击跳过都只发起交叉淡化，收尾统一在 finishSplash 完成
+        function onFinished() { root.crossfadeOutSplash() }
     }
 }

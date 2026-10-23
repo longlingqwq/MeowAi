@@ -14,6 +14,20 @@ Item {
     /// 请求主界面播放一次开屏预览（由外层接管，本页不做播放）
     signal previewSplash()
 
+    /// 文件类失败上报给 main.qml 的 Toast 宿主（页面不自己持有 Toast 实例）
+    signal toastRequested(string message, bool isError)
+
+    /// 最近一次已用 Toast 展示的错误：同一文案不再在页面底部重复出现
+    property string toastSuppressedError: ""
+
+    /// 背景 / 开屏 / 头像读取失败统一走顶部 Toast；空字符串兜底为通用文案
+    function reportFileError(message) {
+        const text = message !== undefined && message !== null && String(message).trim().length > 0
+                   ? String(message) : qsTr("操作失败，请重试")
+        page.toastSuppressedError = text
+        page.toastRequested(text, true)
+    }
+
     ScrollView {
         id: scrollView
         anchors.fill: parent
@@ -227,10 +241,13 @@ Item {
                         }
 
                         Text {
-                            text: qsTr("自定义背景会覆盖在墨色舞台之上，并自动压暗以保持文字可读。")
+                            // 扩展名与上限对齐 backgroundDialog 过滤器及 ThemeManager.cpp 的 kImageLimit
+                            text: qsTr("自定义背景会覆盖在墨色舞台之上，并自动压暗以保持文字可读。支持 PNG / JPG / JPEG / WEBP / BMP / GIF / SVG，单个文件不超过 128 MB。")
                             color: Theme.textFaint
                             font.pixelSize: Theme.fSmall
+                            width: Math.min(page.width - 220, 420)
                             wrapMode: Text.Wrap
+                            lineHeight: 1.5
                         }
 
                         Row {
@@ -259,7 +276,10 @@ Item {
                 id: backgroundDialog
                 title: qsTr("选择背景图")
                 nameFilters: [qsTr("图片 (*.png *.jpg *.jpeg *.webp *.bmp *.gif *.svg)")]
-                onAccepted: Personalize.setBackground(selectedFile.toString())
+                onAccepted: {
+                    if (!Personalize.setBackground(selectedFile.toString()))
+                        page.reportFileError(Personalize.lastError)
+                }
             }
 
             // ------------------------------------------------ 头像
@@ -330,6 +350,7 @@ Item {
             // 头像裁剪弹层：原图只读，取消 / 关闭不会修改现有头像
             AvatarCrop {
                 id: avatarCrop
+                onErrorReported: (message) => page.reportFileError(message)
             }
 
             // ------------------------------------------------ 开屏动画
@@ -380,7 +401,8 @@ Item {
                         }
 
                         Text {
-                            text: qsTr("未设置自定义内容时按当前主题播放内置开屏，设置后以自定义内容为准。播放结束或点击「跳过」即进入主界面。")
+                            // 格式与上限对齐 splashDialog 过滤器及 ThemeManager.cpp 的 kVideoLimit
+                            text: qsTr("未设置自定义内容时按当前主题播放内置开屏，设置后以自定义内容为准。播放结束或点击「跳过」即进入主界面。\n支持 MP4 / MOV / M4V / WEBM / MKV / AVI，单个文件不超过 200 MB。")
                             color: Theme.textFaint
                             font.pixelSize: Theme.fSmall
                             width: Math.min(page.width - 220, 420)
@@ -463,7 +485,10 @@ Item {
                 id: splashDialog
                 title: qsTr("选择开屏视频")
                 nameFilters: [qsTr("视频 (*.mp4 *.mov *.m4v *.webm *.mkv *.avi)")]
-                onAccepted: Personalize.setSplash(selectedFile.toString())
+                onAccepted: {
+                    if (!Personalize.setSplash(selectedFile.toString()))
+                        page.reportFileError(Personalize.lastError)
+                }
             }
 
             // ------------------------------------------------ 帮助与关于
@@ -694,7 +719,9 @@ Item {
             MSurface {
                 width: parent.width
                 height: errorText.implicitHeight + Theme.s4 * 2
+                // 已由顶部 Toast 展示的文件类错误不再在页底重复；其余错误仍内联可见
                 visible: Personalize.lastError.length > 0
+                         && Personalize.lastError !== page.toastSuppressedError
                 radius: Theme.rMd
                 fill: Theme.dangerGhost
                 stroke: Theme.dangerHair

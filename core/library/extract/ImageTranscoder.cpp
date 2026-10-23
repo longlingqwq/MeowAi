@@ -66,11 +66,11 @@ bool ImageTranscoder::transcode(const QString &path, int maxEdge, ImageCaptionTa
         }
         return false;
     }
-    if (info.size() > kMaxExtractBytes) {
+    if (info.size() > kMaxImageBytes) {
         if (error) {
             *error = QStringLiteral("图片文件过大（%1 MB），超出单张上限 %2 MB")
-                         .arg(info.size() / (1024 * 1024))
-                         .arg(kMaxExtractBytes / (1024 * 1024));
+                         .arg(bytesToMbCeil(info.size()))
+                         .arg(kMaxImageBytes / kBytesPerMb);
         }
         return false;
     }

@@ -40,6 +40,8 @@ QtObject {
     property color accentHair: "#59F2A63C"  // 35% 描边
     property color accentInk: "#1A1005"     // 琥珀之上的深色文字
 
+    // 成功语义：ok 为前景（文字 / 状态点 / 图标），okGhost 为淡底（胶囊 / 底座），
+    // okHair 为描边。两套预设必须同时提供这三个令牌，否则换肤会漏色。
     property color ok: "#7FC8A0"
     property color warn: "#E8B86B"
     property color danger: "#E5605A"

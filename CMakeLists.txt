@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.21)
 
 project(MeowAi
-    VERSION 0.2.7
+    VERSION 0.2.7.1
     DESCRIPTION "MeowAi - 本地优先的 AI 助理客户端"
     LANGUAGES CXX
 )
@@ -147,6 +147,7 @@ qt_add_qml_module(MeowAi
         ui/MCombo.qml
         ui/MSwitch.qml
         ui/MChip.qml
+        ui/MToast.qml
         ui/MGlow.qml
         ui/EyeMark.qml
         ui/MAvatar.qml

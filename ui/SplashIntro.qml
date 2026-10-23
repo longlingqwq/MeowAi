@@ -608,7 +608,7 @@ Item {
         }
     }
 
-    // 底部：品牌 + 进度
+    // 底部：品牌标识（保留小 logo 与品牌名，不再显示状态小字与进度条）
     Item {
         id: bottomBar
         anchors.left: parent.left
@@ -621,7 +621,7 @@ Item {
 
         Row {
             anchors.left: parent.left
-            anchors.bottom: progressTrack.top
+            anchors.bottom: parent.bottom
             anchors.bottomMargin: Theme.s3
             spacing: Theme.s2
 
@@ -639,29 +639,6 @@ Item {
                 font.weight: Font.DemiBold
                 font.letterSpacing: 2.6
                 anchors.verticalCenter: parent.verticalCenter
-            }
-
-            MLabel {
-                label: root.soundEnabled ? qsTr("播放中 · 有声") : qsTr("播放中 · 静音")
-                tone: Theme.textGhost
-                anchors.verticalCenter: parent.verticalCenter
-            }
-        }
-
-        Rectangle {
-            id: progressTrack
-            anchors.left: parent.left
-            anchors.right: parent.right
-            anchors.bottom: parent.bottom
-            height: 2
-            radius: 1
-            color: Theme.hairline
-
-            Rectangle {
-                height: parent.height
-                radius: 1
-                color: root.primaryColor
-                width: parent.width * Math.min(1, root.elapsedMs / root.timelineMs)
             }
         }
     }

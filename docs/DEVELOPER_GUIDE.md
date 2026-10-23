@@ -1,8 +1,8 @@
 # MeowAi 开发 / 运维 / 销售参考手册
 
-> 版本：v0.2.7
+> 版本：v0.2.7.1
 > 读者：接手开发的人、负责交付和排障的人、对外演示和销售的人
-> 口径：本手册以 v0.2.7 提交 `5622ac4` 的代码、`CMakeLists.txt`、`resources/providers.json`、`.git` 和 `docs/DEVLOG.md` 为准。状态分为已交付、待验收、骨架、未实现。骨架表示有代码或接口但未接入主流程；未实现表示没有可用功能。
+> 口径：本手册以 v0.2.7.1 分支 HEAD 的代码、`CMakeLists.txt`、`resources/providers.json`、`.git` 和 `docs/DEVLOG.md` 为准。v0.2.7.1 无 DEVLOG 条目，变更证据来自该分支提交。状态分为已交付、待验收、骨架、未实现。骨架表示有代码或接口但未接入主流程；未实现表示没有可用功能。
 
 ---
 
@@ -114,9 +114,9 @@ ctest --test-dir build -C Debug --output-on-failure
 
 PDFium。PDF 解析依赖 `third_party/pdfium`。运行 `pwsh scripts/fetch-pdfium.ps1` 下载；未放置 PDFium 时项目仍可构建，但 PDF 会走“无文本层”分支。仓库当前没有 `third_party/pdfium`，因此直接从源码构建得到的程序不能解析 PDF。DEVLOG 记录发布安装包内置 PDFium，但仓库没有保留安装包解包内容，产物内部是否包含无法从源码核对。
 
-打包。先构建 Release，再准备 `dist/MeowAi/`（`MeowAi.exe` 和 Qt 运行库），然后用 Inno Setup 编译 `scripts/MeowAi.iss`，输出 `dist/MeowAi-Setup-0.2.7.exe`。安装程序按当前用户安装，默认目录 `C:\Users\<用户名>\AppData\Local\Programs\MeowAi`，不需要管理员权限。安装包不包含手册；发布时把安装包和两份手册放进同一个发放目录。
+打包。先构建 Release，再用 `windeployqt --release --qmldir ui` 把 `MeowAi.exe` 与 Qt 运行库部署到临时目录，最后编译安装脚本。仓库内提供 Inno Setup 脚本 `scripts/MeowAi.iss`，`#define AppVersion "0.2.7.1"`，输出 `dist\MeowAi-Setup-0.2.7.1.exe`。本地实际打包另用 NSIS 脚本 `build-mingw\dist\MeowAi.nsi`（构建目录，不纳入版本库），版本字段同为 0.2.7.1，图标取自 `resources/branding/app.ico`。两种安装程序都按当前用户安装，默认目录 `C:\Users\<用户名>\AppData\Local\Programs\MeowAi`，不需要管理员权限。安装包内附带 `docs/USER_GUIDE.md`，个性化页的“打开用户手册”直接定位到该文件；发布时把安装包和两份手册放进同一个发放目录。
 
-当前交付状态。`产品/` 目录里有 `MeowAi-Setup-0.2.7.exe`，大小约 34.5 MB。`产品/` 被 `.gitignore` 忽略，不在版本库内。仓库没有 `dist/`。`scripts/MeowAi.iss` 的 0.2.7 版本号修改仍在工作区，未提交到 `5622ac4`；提交里的脚本仍是 0.2.6。重新打包前先确认脚本版本。
+当前交付状态。`产品/` 目录里有 `MeowAi-Setup-0.2.7.1.exe`（NSIS 构建，约 33.3 MB）与 `MeowAi-Setup-0.2.7.exe`（历史产物）。`产品/` 被 `.gitignore` 忽略，不在版本库内。仓库没有 `dist/`。`scripts/MeowAi.iss` 的版本号已随 v0.2.7.1 提交。
 
 冒烟检查。`MeowAi.exe --smoke-test` 在主界面加载后立即退出。退出码 0 只说明 QML 根对象加载成功，不覆盖配置、网络、数据库和资料库功能。程序是 WIN32 GUI 子系统，终端看不到标准输出，但可以读退出码：
 
@@ -163,16 +163,15 @@ PDF 无文本层。确认构建时是否启用 PDFium。源码构建默认没有
 
 ## 7. 进度与路线
 
-已交付到 v0.2.7。Windows 主链路完整：配置、对话、联网、资料库、参考模式、个性化、开屏、安装包。
+已交付到 v0.2.7.1。Windows 主链路完整：配置、对话、联网、资料库、参考模式、个性化、开屏、安装包。
 
 当前优先级最高的收尾项：
 
-1. 给 v0.2.7 补 DEVLOG 记录，写清提交、变更、验收结果。
-2. 提交 `scripts/MeowAi.iss` 的 0.2.7 版本号修改。
-3. 修 CI：先构建 `meowai_tests`，再执行 ctest。
-4. 在干净 Windows 虚拟机上做一次安装、升级、卸载验收。
-5. 确认发布包是否内置 PDFium，并把结论写进发布说明。
-6. 补资料库同意文案与实现的定期回归，避免文案再次出现“另行同意图片外发”。
+1. 给 v0.2.7 与 v0.2.7.1 补 DEVLOG 记录，写清提交、变更、验收结果。
+2. 修 CI：先构建 `meowai_tests`，再执行 ctest。
+3. 在干净 Windows 虚拟机上做一次安装、升级、卸载验收。
+4. 确认发布包是否内置 PDFium，并把结论写进发布说明。
+5. 补资料库同意文案与实现的定期回归，避免文案再次出现“另行同意图片外发”。
 
 未排期的模块：文件分类、修改前备份、应用内升级、Skill 调用、视频解析、OCR、Android/Web 客户端。这些模块目前只有骨架或未实现，不能对外承诺日期。
 
@@ -180,8 +179,8 @@ PDF 无文本层。确认构建时是否启用 PDFium。源码构建默认没有
 
 ## 8. 已知限制
 
-- v0.2.7 没有 DEVLOG 条目，变更证据只有 git 提交。
-- `scripts/MeowAi.iss` 的 0.2.7 版本号未提交，当前 HEAD 脚本仍是 0.2.6。
+- v0.2.7 与 v0.2.7.1 没有 DEVLOG 条目，变更证据只有 git 提交。
+- v0.2.7.1 的安装包在本地用 NSIS 脚本构建，该脚本位于 `build-mingw\dist\`，不纳入版本库。
 - CI 不构建测试目标，测试证据只能来自本地。
 - 仓库没有 `third_party/pdfium`，源码构建不能解析 PDF 文本层。
 - 仓库没有 `dist/`，安装包只在被忽略的 `产品/` 目录里。
@@ -328,11 +327,11 @@ $LASTEXITCODE
 pwsh scripts/fetch-pdfium.ps1
 ```
 
-打包命令：用 Inno Setup 编译器打开 `scripts/MeowAi.iss`，先确认 `#define MyAppVersion "0.2.7"`，再编译。产物复制到 `产品/`，同时复制 `docs/USER_GUIDE.md` 和 `docs/DEVELOPER_GUIDE.md`。
+打包命令：用 Inno Setup 编译器打开 `scripts/MeowAi.iss`，先确认 `#define AppVersion "0.2.7.1"`，再编译。产物复制到 `产品/`，同时复制 `docs/USER_GUIDE.md` 和 `docs/DEVELOPER_GUIDE.md`。用 NSIS 打包时，先确认 `build-mingw\dist\MeowAi.nsi` 中的 `APP_VERSION`、`Name`、`OutFile`、`VIProductVersion`、`FileVersion`、`ProductVersion`、`DisplayVersion` 七处版本号一致，再执行 `makensis build-mingw\dist\MeowAi.nsi`。
 
 ---
 
-## 14. 版本变更记录（v0.1.0 → v0.2.7）
+## 14. 版本变更记录（v0.1.0 → v0.2.7.1）
 
 仓库没有 annotated tag 历史，原有版本标识实际是分支 ref。2026-10-22 为 v0.2.3、v0.2.4 补建了本地 annotated tag，均指向合并提交 `9661eff`；标签未推送远端。
 
@@ -346,6 +345,7 @@ pwsh scripts/fetch-pdfium.ps1
 | v0.2.5 | 2026-10-21（提交） | `aee4aa5` | `origin/v0.2.5`；DEVLOG 记录日期 2026-10-20，L139–518 |
 | v0.2.6 | 2026-10-21 | `9bbe54f` | HEAD 前代；基线 `ce1bdae` 无 ref；DEVLOG L42–121 |
 | v0.2.7 | 2026-10-22 | `5622ac4` | 基线 `ca2d4a5`；`origin/v0.2.7`；DEVLOG 无记录 |
+| v0.2.7.1 | 2026-10-24 | `{{COMMIT}}` | 基线 `ad3e664`；`origin/v0.2.7.1`；DEVLOG 无记录 |
 
 v0.1.0
 
@@ -458,3 +458,17 @@ v0.2.7
 | 未完成或已知限制 | DEVLOG 没有 v0.2.7 条目；仓库没有 `dist/`，安装包只存在于被忽略的 `产品/`；没有干净虚拟机验收记录；CI 仍不构建测试；PDFium、分类、备份、升级、Skill、视频、OCR、Android/Web 的限制不变 |
 | 证据来源 | `git show 5622ac4`；`git show ca2d4a5`；`git show a61859d`；`git show 82fcb60`；`git log --oneline 9bbe54f..82fcb60`；DEVLOG 无 v0.2.7 记录 |
 | 状态 | 已交付（Windows 初步验收；发布记录不完整） |
+
+v0.2.7.1
+
+| 字段 | 内容 |
+| --- | --- |
+| 版本号 | v0.2.7.1 |
+| 日期 | 2026-10-24 |
+| commit | `{{COMMIT}}`（基线 `ad3e664`；本次合入 M13、M14、M15 与版本号更新） |
+| 新增 | 顶部 Toast：新增 `ui/MToast.qml`，由 `main.qml` 统一持有，资料库导入与解析失败、个性化页背景 / 开屏 / 头像读取失败改由页面顶部弹出；`LibraryPage.qml` 记录已提示的失败文件，历史失败不重复弹；`AvatarCrop.qml` 增加 `errorReported` 信号，图片无法读取时收起裁剪层并转 Toast；`SplashVideo.qml` 增加 `finishPlayback()`，跳过与自然结束共用一次性结束逻辑；`main.qml` 增加开屏层状态（`splashLayerVisible`、`mainOpacity`、`mainRevealed`）与开屏配色映射；文档上限调整：文档类声明上限 1 GB、整文件载入解析的保护阈值 512 MB、图片单张上限 128 MB |
+| 修改 | `main.qml` 窗口底色改为透明，开屏底板移入圆角遮罩内，修复自定义背景与开屏在四角的白色露出；不开开屏时首帧直接显示主内容；离开页面时自动收起该页专属面板（离开对话页关配置面板、离开资料库页关配置抽屉）；`SplashIntro.qml` 删除“播放中 · 有声/静音”小字与进度条，底部只保留小 logo 与品牌名；`SplashVideo.qml` 删除同一组小字、进度条与“正在载入…”提示；`ConversationPage.qml` 增加资料库与联网搜索未就绪原因提示，联网开关开启态改用 `ok` 语义色；`PersonalizationPage.qml` 背景与开屏说明文字写明支持格式与体积上限；`ThemeManager.cpp` 与 `Extractor.h` 抽出字节换算与体积校验工具函数，提示数字由常量推导；`resources/themes/theme2.json` 的 `ok`、`okGhost`、`okHair` 加深，浅蓝主题下的成功态文字更清晰；`ui/Theme.qml` 补成功语义令牌注释；版本号统一为 0.2.7.1（`CMakeLists.txt`、`README.md`、两份手册、`scripts/MeowAi.iss`） |
+| 修复 | 自定义背景与开屏在窗口四角的白色露出；首帧先显示主内容再被开屏覆盖的闪烁；开屏交叉淡化期间尾音继续输出；`PersonalizationPage.qml` 与 `LibraryPage.qml` 文件类错误在页面底部与 Toast 重复展示；体积提示“512 MB 超出 512 MB”一类取整歧义 |
+| 未完成或已知限制 | DEVLOG 没有 v0.2.7.1 条目；`build-mingw\dist\MeowAi.nsi` 不在版本库，安装包只能在本机复现；M17–M20（会话切换页、角色卡、Skill 仓库、Agent 隔离区）未实现；文档类 1 GB 为声明上限，文本 / Office / PDF 解析仍需整文件载入，实际超过 512 MB 会提前拒绝；CI 仍不构建测试；PDFium、分类、备份、升级、视频、OCR、Android/Web 的限制不变 |
+| 证据来源 | v0.2.7.1 分支首个提交（`{{COMMIT}}`）；`git diff ad3e664`；`git status`；DEVLOG 无 v0.2.7.1 记录 |
+| 状态 | 已交付（Windows 构建与冒烟通过；安装包本机构建；发布记录不完整） |

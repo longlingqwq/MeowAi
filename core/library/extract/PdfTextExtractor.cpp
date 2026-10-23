@@ -112,12 +112,7 @@ bool PdfTextExtractor::extract(const QString &path, ExtractionResult *result, QS
         }
         return false;
     }
-    if (info.size() > kMaxExtractBytes) {
-        if (error) {
-            *error = QStringLiteral("文件过大（%1 MB），超出单次解析上限 %2 MB")
-                         .arg(info.size() / (1024 * 1024))
-                         .arg(kMaxExtractBytes / (1024 * 1024));
-        }
+    if (!validateExtractSize(info.size(), error)) {
         return false;
     }
 

@@ -15,7 +15,20 @@ Item {
 
     signal finished()
 
+    /// 结束只发一次：跳过与自然播完/解码失败共用
+    property bool done: false
+
     opacity: 0
+
+    /// 结束后先静音再暂停，避免尾音在交叉淡化期间继续输出
+    function finishPlayback() {
+        if (done)
+            return;
+        done = true;
+        audioOut.muted = true;
+        player.pause();
+        finished();
+    }
 
     Component.onCompleted: {
         player.play()
@@ -35,13 +48,13 @@ Item {
         id: player
         source: Personalize.splashSource
         videoOutput: videoOutput
-        audioOutput: AudioOutput { muted: !root.soundEnabled }
+        audioOutput: AudioOutput { id: audioOut; muted: !root.soundEnabled }
 
         onMediaStatusChanged: {
             if (status === MediaPlayer.EndOfMedia || status === MediaPlayer.InvalidMedia)
-                root.finished()
+                root.finishPlayback()
         }
-        onErrorOccurred: root.finished()
+        onErrorOccurred: root.finishPlayback()
     }
 
     VideoOutput {
@@ -113,21 +126,10 @@ Item {
         }
 
         HoverHandler { id: skipHover }
-        TapHandler { onTapped: root.finished() }
+        TapHandler { onTapped: root.finishPlayback() }
     }
 
-    // 载入提示
-    Text {
-        anchors.centerIn: parent
-        visible: player.mediaStatus === MediaPlayer.LoadingMedia
-                    || player.mediaStatus === MediaPlayer.StalledMedia
-        text: qsTr("正在载入…")
-        color: Theme.textFaint
-        font.pixelSize: Theme.fSmall
-        font.letterSpacing: 1.5
-    }
-
-    // 底部：品牌 + 播放进度
+    // 底部：品牌标识（保留小 logo 与品牌名，不再显示状态小字、进度条与载入提示）
     Item {
         id: bottomBar
         anchors.left: parent.left
@@ -140,7 +142,7 @@ Item {
 
         Row {
             anchors.left: parent.left
-            anchors.bottom: progressTrack.top
+            anchors.bottom: parent.bottom
             anchors.bottomMargin: Theme.s3
             spacing: Theme.s2
 
@@ -158,31 +160,6 @@ Item {
                 font.weight: Font.DemiBold
                 font.letterSpacing: 2.6
                 anchors.verticalCenter: parent.verticalCenter
-            }
-
-            MLabel {
-                label: root.soundEnabled ? qsTr("播放中 · 有声") : qsTr("播放中 · 静音")
-                tone: Theme.textGhost
-                anchors.verticalCenter: parent.verticalCenter
-            }
-        }
-
-        Rectangle {
-            id: progressTrack
-            anchors.left: parent.left
-            anchors.right: parent.right
-            anchors.bottom: parent.bottom
-            height: 2
-            radius: 1
-            color: Theme.hairline
-
-            Rectangle {
-                height: parent.height
-                radius: 1
-                color: Theme.accent
-                width: player.duration > 0
-                       ? parent.width * Math.min(1, player.position / player.duration)
-                       : 0
             }
         }
     }

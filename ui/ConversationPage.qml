@@ -43,6 +43,20 @@ Item {
     /// 等待用户同意后再挂载的小库 id（首次启用资料库时用）
     property int pendingMountId: 0
 
+    /// 资料库已挂载但尚不能参与检索的明确原因：优先同意状态，其次复用现有向量化状态字段
+    readonly property string libraryHintText: {
+        if (!Chat.libraryMounted)
+            return ""
+        if (!Library.consentGiven)
+            return qsTr("资料库尚未生效：还没有同意内容外发")
+        if (!Library.embeddingReady)
+            return Library.embeddingStatus
+        return ""
+    }
+    /// 联网搜索已开启但未就绪的原因：直接复用 core 的现有状态说明，不新造状态
+    readonly property string webHintText: (Chat.webSearchEnabled && !Chat.webSearchReady)
+                                          ? Chat.webSearchMessage : ""
+
     /// 档位显示名：档位是契约常量，展示名只做本地化，不影响下发字段
     function levelLabel(level) {
         switch (level) {
@@ -617,10 +631,12 @@ Item {
                         height: 34
                         radius: Theme.rPill
                         color: Chat.webSearchEnabled
-                               ? (webToggleHover.hovered ? Theme.accentHi : Theme.accent)
+                               ? Theme.okGhost
                                : (webToggleHover.hovered ? Theme.overlayHover : Theme.overlayFaint)
                         border.width: 1
-                        border.color: Chat.webSearchEnabled ? Theme.accent : Theme.hairline
+                        border.color: Chat.webSearchEnabled
+                                      ? (webToggleHover.hovered ? Theme.ok : Theme.okHair)
+                                      : Theme.hairline
 
                         Behavior on color {
                             ColorAnimation { duration: Theme.dFast }
@@ -636,14 +652,12 @@ Item {
                                 height: 6
                                 radius: 3
                                 anchors.verticalCenter: parent.verticalCenter
-                                color: Chat.webSearchEnabled
-                                       ? Theme.accentInk
-                                       : (Chat.webSearchReady ? Theme.ok : Theme.textFaint)
+                                color: Chat.webSearchEnabled ? Theme.ok : Theme.textFaint
                             }
 
                             Text {
                                 text: Chat.webSearchSearching ? qsTr("联网中…") : qsTr("联网搜索")
-                                color: Chat.webSearchEnabled ? Theme.accentInk : Theme.textDim
+                                color: Chat.webSearchEnabled ? Theme.ok : Theme.textDim
                                 font.pixelSize: Theme.fLabel
                                 font.weight: Font.Medium
                                 anchors.verticalCenter: parent.verticalCenter
@@ -663,11 +677,18 @@ Item {
                         width: libraryToggleRow.implicitWidth + 20
                         height: 34
                         radius: Theme.rPill
-                        color: Chat.libraryMounted
-                               ? (libraryToggleHover.hovered ? Theme.accentHi : Theme.accent)
-                               : (libraryToggleHover.hovered ? Theme.overlayHover : Theme.overlayFaint)
+                        // 不可用时只用中性色，不得出现绿色；开启后用 ok 前景 + okGhost 底座
+                        color: !Library.available
+                               ? Theme.overlayFaint
+                               : (Chat.libraryMounted
+                                  ? Theme.okGhost
+                                  : (libraryToggleHover.hovered ? Theme.overlayHover : Theme.overlayFaint))
                         border.width: 1
-                        border.color: Chat.libraryMounted ? Theme.accent : Theme.hairline
+                        border.color: !Library.available
+                                      ? Theme.hairline
+                                      : (Chat.libraryMounted
+                                         ? (libraryToggleHover.hovered ? Theme.ok : Theme.okHair)
+                                         : Theme.hairline)
 
                         Behavior on color {
                             ColorAnimation { duration: Theme.dFast }
@@ -683,16 +704,18 @@ Item {
                                 height: 6
                                 radius: 3
                                 anchors.verticalCenter: parent.verticalCenter
-                                color: Chat.libraryMounted
-                                       ? Theme.accentInk
-                                       : (Library.consentGiven ? Theme.ok : Theme.textFaint)
+                                color: !Library.available
+                                       ? Theme.textDim
+                                       : (Chat.libraryMounted ? Theme.ok : Theme.textFaint)
                             }
 
                             Text {
                                 text: Chat.libraryMounted
                                       ? qsTr("资料库 · %1").arg(Chat.mountedCollections.length)
                                       : qsTr("资料库")
-                                color: Chat.libraryMounted ? Theme.accentInk : Theme.textDim
+                                color: !Library.available
+                                       ? Theme.textDim
+                                       : (Chat.libraryMounted ? Theme.ok : Theme.textDim)
                                 font.pixelSize: Theme.fLabel
                                 font.weight: Font.Medium
                                 anchors.verticalCenter: parent.verticalCenter
@@ -805,6 +828,30 @@ Item {
                         text: qsTr("中断")
                         visible: Chat.busy
                         onClicked: Chat.cancel()
+                    }
+                }
+
+                // 开关旁的原因提示：已开启但条件未满足时明确说明，避免静默失败
+                Column {
+                    width: parent.width
+                    spacing: 2
+
+                    Text {
+                        width: parent.width
+                        visible: page.libraryHintText.length > 0
+                        text: page.libraryHintText
+                        color: Theme.textDim
+                        font.pixelSize: Theme.fLabel
+                        wrapMode: Text.Wrap
+                    }
+
+                    Text {
+                        width: parent.width
+                        visible: page.webHintText.length > 0
+                        text: page.webHintText
+                        color: Theme.textDim
+                        font.pixelSize: Theme.fLabel
+                        wrapMode: Text.Wrap
                     }
                 }
 

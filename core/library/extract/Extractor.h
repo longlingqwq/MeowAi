@@ -122,8 +122,56 @@ public:
  * 这样同步接口不会偷偷联网，图片也仍然「经同一注册点接入」。
  */
 
-/// 单次解析的字节上限：超过直接拒绝，避免一个超大文件把内存吃满
-constexpr qint64 kMaxExtractBytes = 64LL * 1024 * 1024;
+/// 字节 → MB 的换算基准：统一 qint64，避免 32 位 int 溢出
+constexpr qint64 kBytesPerMb = 1024LL * 1024;
+
+/// 文档类单次解析上限：超过直接拒绝，避免一个超大文件把内存吃满
+constexpr qint64 kMaxExtractBytes = 1024LL * 1024 * 1024;
+
+/**
+ * 整文件载入型解析器的内存保护阈值。
+ *
+ * 现有 txt / md / csv / json、docx / xlsx / pptx、PDF 解析器均为「readAll 后解析」，
+ * 512 MB 原文在 UTF-16 转换与解压后峰值可达 GB 级。超过该值提前拒绝，
+ * 避免「用整文件读入换高上限」导致 OOM；对外声明上限仍是 `kMaxExtractBytes`。
+ */
+constexpr qint64 kMaxInMemoryParseBytes = 512LL * 1024 * 1024;
+
+/// 图片单张上限：资料库图片与主题 / 背景图片统一
+constexpr qint64 kMaxImageBytes = 128LL * 1024 * 1024;
+
+/// 实际体积向上取整到 MB，避免「512 MB 超出 512 MB」这类含糊提示
+inline qint64 bytesToMbCeil(qint64 bytes)
+{
+    return bytes <= 0 ? 0 : (bytes + kBytesPerMb - 1) / kBytesPerMb;
+}
+
+/**
+ * 文本 / Office / PDF 解析前的体积校验：先卡声明上限，再卡内存保护阈值。
+ * 失败返回 false 并写 `error`；提示里的数字全部由常量推导，不手写数值。
+ */
+inline bool validateExtractSize(qint64 size, QString *error)
+{
+    if (size > kMaxExtractBytes) {
+        if (error) {
+            *error = QStringLiteral("文件过大（%1 MB），超出单次解析上限 %2 MB")
+                         .arg(bytesToMbCeil(size))
+                         .arg(kMaxExtractBytes / kBytesPerMb);
+        }
+        return false;
+    }
+    if (size > kMaxInMemoryParseBytes) {
+        if (error) {
+            *error = QStringLiteral("文件过大（%1 MB）：当前解析方式需整文件载入内存，"
+                                    "单次最多支持 %2 MB（声明上限 %3 MB），请拆分后再导入")
+                         .arg(bytesToMbCeil(size))
+                         .arg(kMaxInMemoryParseBytes / kBytesPerMb)
+                         .arg(kMaxExtractBytes / kBytesPerMb);
+        }
+        return false;
+    }
+    return true;
+}
 
 /// 表格类解析（CSV / XLSX）每片段容纳的数据行数（不含表头）：
 /// 既保证「第 12-18 行」这类定位可核对，也避免片段过碎
@@ -160,7 +208,8 @@ inline QString markdownSeparator(int columns)
 
 /**
  * 读取文本类文件为统一口径的字符串（纯文本 / CSV / JSON 三个解析器共用）：
- *  - 校验存在、是普通文件、未超 `kMaxExtractBytes`；
+ *  - 校验存在、是普通文件、未超 `kMaxExtractBytes`，且未超整文件载入的
+ *    内存保护阈值 `kMaxInMemoryParseBytes`；
  *  - 去掉 UTF-8 BOM；
  *  - 先按 UTF-8 解码；出现替换字符（非法序列）时回落到本地编码（中文 Windows 即 GBK）；
  *  - `\r\n` 与孤立 `\r` 一律归一为 `\n`，避免后续分段/切分被换行符差异干扰。
@@ -180,12 +229,7 @@ inline bool readLibraryTextFile(const QString &path, QString *text, QString *err
         }
         return false;
     }
-    if (info.size() > kMaxExtractBytes) {
-        if (error) {
-            *error = QStringLiteral("文件过大（%1 MB），超出单次解析上限 %2 MB")
-                         .arg(info.size() / (1024 * 1024))
-                         .arg(kMaxExtractBytes / (1024 * 1024));
-        }
+    if (!validateExtractSize(info.size(), error)) {
         return false;
     }
 

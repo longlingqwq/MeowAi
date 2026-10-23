@@ -19,6 +19,14 @@ Item {
     property int pendingRemoval: 0
     property bool dropActive: false
 
+    /// 文件类失败上报给 main.qml 的 Toast 宿主（页面不自己持有 Toast 实例）
+    signal toastRequested(string message, bool isError)
+
+    /// 已提示过的失败文件（id → errorText）：只对新增失败弹 Toast，历史失败不重复报
+    property var knownFailedIds: ({})
+
+    Component.onCompleted: seedFailedFiles()
+
     /// 当前小库里「等待前置条件」的文件数量，用于给出可操作的下一步提示
     readonly property int pendingImageCount: countFiles("pending", "image")
     readonly property int pendingEmbeddingCount: countFiles("needs_embedding", "")
@@ -47,9 +55,52 @@ Item {
         return paths
     }
 
+    /// 页面创建时已有失败文件只记为「已知」，避免启动后把历史失败再弹一遍
+    function seedFailedFiles() {
+        const seed = ({})
+        const items = Library.files
+        for (let i = 0; i < items.length; ++i) {
+            if (items[i].status === "failed" && items[i].errorText.length > 0)
+                seed[items[i].id] = items[i].errorText
+        }
+        page.knownFailedIds = seed
+    }
+
+    /// 解析失败是异步落库的：只对新增的 failed 文件弹 Toast
+    function reportNewFileFailures() {
+        const items = Library.files
+        for (let i = 0; i < items.length; ++i) {
+            const item = items[i]
+            if (item.status === "failed" && item.errorText.length > 0) {
+                if (page.knownFailedIds[item.id] !== item.errorText) {
+                    page.knownFailedIds[item.id] = item.errorText
+                    page.toastRequested(item.errorText, true)
+                }
+            } else if (Object.prototype.hasOwnProperty.call(page.knownFailedIds, item.id)) {
+                // 重建后状态离开 failed：清掉记录，下次再失败可以重新提示
+                delete page.knownFailedIds[item.id]
+            }
+        }
+    }
+
+    /// 导入失败类消息：成功计数仍内联展示，失败原因改走顶部 Toast
+    function isImportProblem(text) {
+        return text.indexOf("没有可导入的文件") === 0
+            || text.indexOf("部分文件导入失败") >= 0
+            || text.indexOf("导入失败") >= 0
+            || text.indexOf("暂不支持的文件类型") >= 0
+    }
+
+    function reportImportProblem() {
+        if (Library.message.length > 0 && page.isImportProblem(Library.message))
+            page.toastRequested(Library.message, true)
+    }
+
     Connections {
         target: Library
         function onConsentRequired() { consentDialog.open = true }
+        function onFilesChanged() { page.reportNewFileFailures() }
+        function onStateChanged() { page.reportImportProblem() }
     }
 
     // ---------------------------------------------------------------- 两栏
@@ -277,7 +328,8 @@ Item {
 
                 Text {
                     Layout.fillWidth: true
-                    visible: Library.message.length > 0
+                    // 导入失败已改由顶部 Toast 展示；这里只保留成功计数等状态
+                    visible: Library.message.length > 0 && !page.isImportProblem(Library.message)
                     text: Library.message
                     color: Theme.textDim
                     font.pixelSize: Theme.fSmall

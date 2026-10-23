@@ -27,6 +27,9 @@ Popup {
     /// 错误 / 失败原因（显示在弹层内）
     property string errorText: ""
 
+    /// 头像图片读取失败：交给外层页面的顶部 Toast 展示
+    signal errorReported(string message)
+
     readonly property real minZoom: 1.0
     readonly property real maxZoom: 4.0
     /// 预览直径：随窗口收窄，但不超过 264
@@ -208,6 +211,14 @@ Popup {
                         Image {
                             id: previewImage
                             source: root.source
+
+                            // 无法读取时不再弹层内提示：上报页面顶部 Toast 并收起弹层
+                            onStatusChanged: {
+                                if (root.opened && status === Image.Error) {
+                                    root.errorReported(qsTr("头像图片无法读取，请换一张图片。"))
+                                    root.close()
+                                }
+                            }
 
                             /// 原图（受 sourceSize 限制后）的自然尺寸；未加载时为 0
                             readonly property real naturalWidth: implicitWidth > 0 ? implicitWidth : 0

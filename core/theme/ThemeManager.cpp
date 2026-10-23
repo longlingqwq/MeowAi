@@ -21,9 +21,18 @@ const QStringList kImageExtensions = { QStringLiteral("png"), QStringLiteral("jp
 const QStringList kVideoExtensions = { QStringLiteral("mp4"), QStringLiteral("mov"), QStringLiteral("m4v"),
                                        QStringLiteral("webm"), QStringLiteral("mkv"), QStringLiteral("avi") };
 
-constexpr qint64 kFontLimit = 20 * 1024 * 1024;   // 20 MB
-constexpr qint64 kImageLimit = 20 * 1024 * 1024;  // 20 MB
-constexpr qint64 kVideoLimit = 200 * 1024 * 1024; // 200 MB
+/// 字节 → MB 的换算基准：统一 qint64，避免 32 位 int 溢出
+constexpr qint64 kBytesPerMb = 1024LL * 1024;
+
+constexpr qint64 kFontLimit = 20LL * kBytesPerMb;   // 20 MB
+constexpr qint64 kImageLimit = 128LL * kBytesPerMb; // 128 MB（背景 / 头像与资料库图片统一）
+constexpr qint64 kVideoLimit = 200LL * kBytesPerMb; // 200 MB
+
+/// 实际体积向上取整到 MB，避免「128 MB 超出 128 MB」这类含糊提示
+qint64 bytesToMbCeil(qint64 bytes)
+{
+    return bytes <= 0 ? 0 : (bytes + kBytesPerMb - 1) / kBytesPerMb;
+}
 
 /// 只保留安全字符，防止导入文件名带出路径穿越或非法字符
 QString sanitizeBaseName(const QString &baseName)
@@ -514,8 +523,8 @@ bool ThemeManager::importAsset(const QString &sourcePath, AssetKind kind, const 
     }
     if (size > limit) {
         return fail(QStringLiteral("文件过大（%1 MB，上限 %2 MB）")
-                        .arg(size / (1024 * 1024))
-                        .arg(limit / (1024 * 1024)));
+                        .arg(bytesToMbCeil(size))
+                        .arg(limit / kBytesPerMb));
     }
 
     const QString dirPath = QDir(m_paths.assetsDir()).filePath(subDir);

@@ -69,7 +69,7 @@ Item {
                 }
                 Text {
                     width: parent.width
-                    text: "· 图片：只有在你另行同意图片外发并配置视觉模型后，才会压缩转码后发送用于生成描述。"
+                    text: "· 图片：你同意启用资料库并配置视觉模型后，图片会压缩转码并发送，用于生成描述。"
                     color: Theme.textDim
                     font.pixelSize: Theme.fSmall
                     wrapMode: Text.Wrap
