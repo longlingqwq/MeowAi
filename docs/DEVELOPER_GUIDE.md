@@ -345,7 +345,7 @@ pwsh scripts/fetch-pdfium.ps1
 | v0.2.5 | 2026-10-21（提交） | `aee4aa5` | `origin/v0.2.5`；DEVLOG 记录日期 2026-10-20，L139–518 |
 | v0.2.6 | 2026-10-21 | `9bbe54f` | HEAD 前代；基线 `ce1bdae` 无 ref；DEVLOG L42–121 |
 | v0.2.7 | 2026-10-22 | `5622ac4` | 基线 `ca2d4a5`；`origin/v0.2.7`；DEVLOG 无记录 |
-| v0.2.7.1 | 2026-10-24 | `{{COMMIT}}` | 基线 `ad3e664`；`origin/v0.2.7.1`；DEVLOG 无记录 |
+| v0.2.7.1 | 2026-10-24 | `82527b0` | 基线 `ad3e664`；`origin/v0.2.7.1`；DEVLOG 无记录 |
 
 v0.1.0
 
@@ -465,10 +465,10 @@ v0.2.7.1
 | --- | --- |
 | 版本号 | v0.2.7.1 |
 | 日期 | 2026-10-24 |
-| commit | `{{COMMIT}}`（基线 `ad3e664`；本次合入 M13、M14、M15 与版本号更新） |
+| commit | `82527b0`（基线 `ad3e664`；本次合入 M13、M14、M15 与版本号更新） |
 | 新增 | 顶部 Toast：新增 `ui/MToast.qml`，由 `main.qml` 统一持有，资料库导入与解析失败、个性化页背景 / 开屏 / 头像读取失败改由页面顶部弹出；`LibraryPage.qml` 记录已提示的失败文件，历史失败不重复弹；`AvatarCrop.qml` 增加 `errorReported` 信号，图片无法读取时收起裁剪层并转 Toast；`SplashVideo.qml` 增加 `finishPlayback()`，跳过与自然结束共用一次性结束逻辑；`main.qml` 增加开屏层状态（`splashLayerVisible`、`mainOpacity`、`mainRevealed`）与开屏配色映射；文档上限调整：文档类声明上限 1 GB、整文件载入解析的保护阈值 512 MB、图片单张上限 128 MB |
 | 修改 | `main.qml` 窗口底色改为透明，开屏底板移入圆角遮罩内，修复自定义背景与开屏在四角的白色露出；不开开屏时首帧直接显示主内容；离开页面时自动收起该页专属面板（离开对话页关配置面板、离开资料库页关配置抽屉）；`SplashIntro.qml` 删除“播放中 · 有声/静音”小字与进度条，底部只保留小 logo 与品牌名；`SplashVideo.qml` 删除同一组小字、进度条与“正在载入…”提示；`ConversationPage.qml` 增加资料库与联网搜索未就绪原因提示，联网开关开启态改用 `ok` 语义色；`PersonalizationPage.qml` 背景与开屏说明文字写明支持格式与体积上限；`ThemeManager.cpp` 与 `Extractor.h` 抽出字节换算与体积校验工具函数，提示数字由常量推导；`resources/themes/theme2.json` 的 `ok`、`okGhost`、`okHair` 加深，浅蓝主题下的成功态文字更清晰；`ui/Theme.qml` 补成功语义令牌注释；版本号统一为 0.2.7.1（`CMakeLists.txt`、`README.md`、两份手册、`scripts/MeowAi.iss`） |
 | 修复 | 自定义背景与开屏在窗口四角的白色露出；首帧先显示主内容再被开屏覆盖的闪烁；开屏交叉淡化期间尾音继续输出；`PersonalizationPage.qml` 与 `LibraryPage.qml` 文件类错误在页面底部与 Toast 重复展示；体积提示“512 MB 超出 512 MB”一类取整歧义 |
 | 未完成或已知限制 | DEVLOG 没有 v0.2.7.1 条目；`build-mingw\dist\MeowAi.nsi` 不在版本库，安装包只能在本机复现；M17–M20（会话切换页、角色卡、Skill 仓库、Agent 隔离区）未实现；文档类 1 GB 为声明上限，文本 / Office / PDF 解析仍需整文件载入，实际超过 512 MB 会提前拒绝；CI 仍不构建测试；PDFium、分类、备份、升级、视频、OCR、Android/Web 的限制不变 |
-| 证据来源 | v0.2.7.1 分支首个提交（`{{COMMIT}}`）；`git diff ad3e664`；`git status`；DEVLOG 无 v0.2.7.1 记录 |
+| 证据来源 | v0.2.7.1 分支提交 `82527b0`；`git diff ad3e664`；`git status`；DEVLOG 无 v0.2.7.1 记录 |
 | 状态 | 已交付（Windows 构建与冒烟通过；安装包本机构建；发布记录不完整） |
