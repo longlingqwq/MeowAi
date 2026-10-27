@@ -17,7 +17,7 @@ void setError(QString *error, const QString &message)
     }
 }
 
-constexpr int kCurrentSchemaVersion = 4;
+constexpr int kCurrentSchemaVersion = 5;
 
 /// 读取 meta 中的 schema_version；无记录或非法值视为 0（全新库）
 int readSchemaVersion(const QSqlDatabase &db)
@@ -324,6 +324,29 @@ QStringList schemaV3Statements()
     };
 }
 
+/// v5：角色卡（M18）。
+/// 只新增 role_cards 表与名称唯一索引，不触碰既有任何表；全部 IF NOT EXISTS，幂等可重复执行。
+/// avatar_path 保存「相对 App 根目录」的路径（如 assets/rolecards/xx.png），不写入用户绝对路径。
+QStringList schemaV5Statements()
+{
+    return {
+        QStringLiteral(
+            "CREATE TABLE IF NOT EXISTS role_cards ("
+            "  id             INTEGER PRIMARY KEY AUTOINCREMENT,"
+            "  name           TEXT    NOT NULL,"
+            "  avatar_path    TEXT    NOT NULL DEFAULT '',"
+            "  system_prompt  TEXT    NOT NULL DEFAULT '',"
+            "  provider_id    TEXT    NOT NULL DEFAULT '',"
+            "  model_id       TEXT    NOT NULL DEFAULT '',"
+            "  thinking_level TEXT    NOT NULL DEFAULT '',"
+            "  created_at     INTEGER NOT NULL,"
+            "  updated_at     INTEGER NOT NULL"
+            ")"),
+        QStringLiteral(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_role_cards_name ON role_cards(name)"),
+    };
+}
+
 } // namespace
 
 Database::Database()
@@ -450,6 +473,12 @@ bool Database::ensureSchema(QString *error)
                              QStringLiteral("INTEGER NOT NULL DEFAULT -1"), error)
             || !ensureColumn(db, QStringLiteral("messages"), QStringLiteral("elapsed_ms"),
                              QStringLiteral("INTEGER NOT NULL DEFAULT -1"), error)) {
+            return false;
+        }
+    }
+    if (version < 5) {
+        // v5：角色卡表（M18）。纯增量建表，不回写、不删除既有数据。
+        if (!execStatements(db, schemaV5Statements(), error)) {
             return false;
         }
     }

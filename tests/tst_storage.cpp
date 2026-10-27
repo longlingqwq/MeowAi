@@ -144,8 +144,8 @@ void TstStorage::schemaV2CreatesLibraryTables()
     QSqlQuery version(db.handle());
     QVERIFY(version.exec(QStringLiteral("SELECT value FROM meta WHERE key = 'schema_version'")));
     QVERIFY(version.next());
-    // v2 测试只要求库至少完成 v2 迁移；后续迁移（v3/v4）会继续抬高版本号
-    QVERIFY(version.value(0).toInt() >= 2);
+    // 只要求「不低于当前模块需要的迁移版本」（M18 角色卡需要 v5）；后续迁移会继续抬高版本号
+    QVERIFY(version.value(0).toInt() >= 5);
 }
 
 void TstStorage::schemaV2MigrationIsIdempotentAndKeepsV1Tables()

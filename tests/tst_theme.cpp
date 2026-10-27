@@ -55,6 +55,7 @@ private slots:
     void importUnsupportedExtensionRejected();
     void importEmptyFileRejected();
     void importOversizeRejected();
+    void importVideoOversizeRejected();
     void pathTraversalRejected();
     void clearBackgroundRemovesFile();
     void resetAllRestoresDefaults();
@@ -255,6 +256,30 @@ void TestTheme::importOversizeRejected()
 
     QVERIFY(!theme.setBackground(source));
     QVERIFY(theme.lastError().contains(QStringLiteral("过大")));
+}
+
+/// 开屏视频上限单独放宽到 1 GB：刚过 1 GB 必须被拒，且提示按 GB 表达
+void TestTheme::importVideoOversizeRejected()
+{
+    QTemporaryDir dir;
+    AppPaths paths(dir.path());
+    QString error;
+    QVERIFY(paths.ensureLayout(&error));
+
+    const QString source = dir.filePath(QStringLiteral("huge.mp4"));
+    QFile big(source);
+    QVERIFY(big.open(QIODevice::WriteOnly));
+    QVERIFY(big.resize(1025LL * 1024 * 1024)); // 超过 1 GB 视频上限（稀疏文件，不实占磁盘）
+    big.close();
+
+    PersonalizationStore store(paths.configFile());
+    ThemeManager theme(paths, &store);
+    theme.load();
+
+    QVERIFY(!theme.setSplash(source));
+    QVERIFY(theme.lastError().contains(QStringLiteral("过大")));
+    QVERIFY(theme.lastError().contains(QStringLiteral("1 GB"))); // 1024 MB 应显示为 1 GB
+    QCOMPARE(theme.splashSource(), QString());
 }
 
 void TestTheme::pathTraversalRejected()

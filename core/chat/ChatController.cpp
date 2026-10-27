@@ -6,6 +6,7 @@
 #include "core/retriever/RagRetriever.h"
 #include "core/retriever/ChunkSplitter.h"
 #include "core/retriever/InjectionPlanner.h"
+#include "core/skill/SkillCatalog.h"
 #include "core/web/WebSearchService.h"
 #include "core/web/WebSearchTool.h"
 #include "providers/ProviderFactory.h"
@@ -19,6 +20,8 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QTextDocumentFragment>
+
+#include <utility>
 
 // BudgetCalculator 是纯静态 struct，直接 BudgetCalculator::calculate(...) 调用
 // estimateTokens 是 ChunkSplitter.h 里的全局函数（已 include）
@@ -626,6 +629,20 @@ void ChatController::setThinkingLevel(const QString &level)
     emit thinkingChanged();
 }
 
+QString ChatController::systemPrompt() const
+{
+    return m_systemPrompt;
+}
+
+void ChatController::setSystemPrompt(const QString &prompt)
+{
+    if (m_systemPrompt == prompt)
+        return;
+    // 只改内存态：下一条消息生效，不重写历史消息、不触发任何持久化
+    m_systemPrompt = prompt;
+    emit systemPromptChanged();
+}
+
 void ChatController::setCustomBaseUrl(const QString &baseUrl)
 {
     const QString value = baseUrl.trimmed();
@@ -910,12 +927,35 @@ void ChatController::continueDispatch(const ChatMessage &userMessage, const QStr
     timeContext.text = currentTimeSystemMessage();
     request.messages.prepend(timeContext);
 
-    // 资料库片段紧随时间上下文之后：只作为「资料」，不得被当成指令执行
+    // 系统提示注入顺序（固定契约）：角色卡 → 当前时间 → 技能 → 资料库。
+    // 角色卡（M18）是人格设定，固定为**第一条** system 消息（index 0）；当前时间、技能、
+    // 资料库都只是背景资料，必须排在其后，避免把角色设定挤到「资料」的位置。
+    // 空提示词（含纯空白）一律不下发，避免出现空 system 消息。
+    int slot = 1;
+    if (!m_systemPrompt.trimmed().isEmpty()) {
+        ChatMessage roleContext;
+        roleContext.role = ChatMessage::System;
+        roleContext.text = m_systemPrompt;
+        request.messages.insert(0, roleContext);
+        ++slot;  // 时间上下文被顶到 index 1，后续注入从 index 2 起
+    }
+
+    // 技能（功能 #9）：无命中时不注入空内容；预算与截断由 SkillCatalog 统一处理
+    const QString skillContext = buildSkillContext(userMessage.text);
+    if (!skillContext.isEmpty()) {
+        ChatMessage skillMessage;
+        skillMessage.role = ChatMessage::System;
+        skillMessage.text = skillContext;
+        request.messages.insert(slot, skillMessage);
+        ++slot;
+    }
+
+    // 资料库片段紧随技能之后：只作为「资料」，不得被当成指令执行
     if (!libraryContext.isEmpty()) {
         ChatMessage libraryMessage;
         libraryMessage.role = ChatMessage::System;
         libraryMessage.text = libraryContext;
-        request.messages.insert(1, libraryMessage);
+        request.messages.insert(slot, libraryMessage);
     }
 
     // 联网检索（B 形态）：开关打开时把「联网搜索」作为工具交给模型，由模型**自行决定**是否调用。
@@ -984,6 +1024,97 @@ void ChatController::attachLibrary(LibraryStore *store, RagRetriever *retriever,
         }
         emit libraryChanged();
     }
+}
+
+void ChatController::attachSkills(SkillCatalog *skills)
+{
+    if (m_skills == skills) {
+        return;
+    }
+    if (m_skills) {
+        disconnect(m_skills, nullptr, this, nullptr);
+    }
+    m_skills = skills;
+
+    if (m_skills) {
+        // 模式切换直接影响输入区入口的显隐
+        connect(m_skills, &SkillCatalog::modeChanged, this, &ChatController::skillSelectionChanged);
+        // 技能被禁用 / 删除后剔除已失效的手动选择，避免下一轮注入幽灵技能
+        connect(m_skills, &SkillCatalog::skillsChanged, this, [this] {
+            QStringList kept;
+            const QStringList available = m_skills ? m_skills->ids() : QStringList();
+            for (const QString &id : std::as_const(m_pendingSkills)) {
+                if (available.contains(id) && m_skills->isEnabled(id)) {
+                    kept << id;
+                }
+            }
+            if (kept != m_pendingSkills) {
+                m_pendingSkills = kept;
+                emit skillSelectionChanged();
+            }
+        });
+    }
+
+    m_pendingSkills.clear();
+    emit skillSelectionChanged();
+}
+
+QStringList ChatController::pendingSkills() const
+{
+    return m_pendingSkills;
+}
+
+bool ChatController::skillManualMode() const
+{
+    return m_skills && m_skills->manualMode();
+}
+
+void ChatController::togglePendingSkill(const QString &id)
+{
+    // 只有手动模式才允许选择；自动模式的命中完全由触发词决定
+    if (!m_skills || !m_skills->manualMode()) {
+        return;
+    }
+    if (!m_skills->ids().contains(id) || !m_skills->isEnabled(id)) {
+        return; // 禁用 / 不存在的技能永不被选
+    }
+
+    const int index = m_pendingSkills.indexOf(id);
+    if (index >= 0) {
+        m_pendingSkills.removeAt(index);
+        emit skillSelectionChanged();
+        return;
+    }
+    if (m_pendingSkills.size() >= SkillCatalog::kMaxAutoSkills) {
+        return; // 上限 2 个，超出忽略
+    }
+    m_pendingSkills << id;
+    emit skillSelectionChanged();
+}
+
+void ChatController::clearPendingSkills()
+{
+    if (m_pendingSkills.isEmpty()) {
+        return;
+    }
+    m_pendingSkills.clear();
+    emit skillSelectionChanged();
+}
+
+QString ChatController::buildSkillContext(const QString &userText)
+{
+    if (!m_skills) {
+        return {};
+    }
+
+    const SkillCatalog::Injection injection = m_skills->composeInjection(userText, m_pendingSkills);
+
+    // 手动选择只对本次发送生效：无论是否命中都清空，避免下一轮误注入
+    if (!m_pendingSkills.isEmpty()) {
+        m_pendingSkills.clear();
+        emit skillSelectionChanged();
+    }
+    return injection.text;
 }
 
 QVariantList ChatController::mountedCollections() const
@@ -1175,6 +1306,8 @@ void ChatController::handleLibraryRetrievalFinished(const RetrievalResult &resul
                 historyTokens += estimateTokens(message.text);
             }
         }
+        // 角色卡提示词（M18）同样占用注入预算：资料库注入据此收紧，两者合计不超既有预算
+        historyTokens += estimateTokens(m_systemPrompt);
 
         injected = m_fileRetriever->planInjection(result.chunks, config,
                                                   contextWindowForCurrentModel(), historyTokens,

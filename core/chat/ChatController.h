@@ -24,6 +24,7 @@ class NetworkTransport;
 class ProviderCatalog;
 class RagRetriever;
 class SecureStore;
+class SkillCatalog;
 class WebConfigStore;
 class WebSearchService;
 class WebSearchTool;
@@ -47,6 +48,8 @@ class ChatController : public QObject
     Q_PROPERTY(QString modelId READ modelId WRITE setModelId NOTIFY modelChanged)
     Q_PROPERTY(QString thinkingLevel READ thinkingLevel WRITE setThinkingLevel NOTIFY thinkingChanged)
     Q_PROPERTY(QStringList thinkingLevels READ thinkingLevels NOTIFY thinkingChanged)
+    /// 角色卡系统提示词（M18）：每次发送时作为第一条 system 消息下发；空串不注入
+    Q_PROPERTY(QString systemPrompt READ systemPrompt WRITE setSystemPrompt NOTIFY systemPromptChanged)
     Q_PROPERTY(QString credentialStatus READ credentialStatus NOTIFY credentialChanged)
     Q_PROPERTY(QString credentialMessage READ credentialMessage NOTIFY credentialChanged)
     Q_PROPERTY(bool validating READ validating NOTIFY credentialChanged)
@@ -78,6 +81,10 @@ class ChatController : public QObject
     Q_PROPERTY(QVariantList librarySources READ librarySources NOTIFY librarySourcesChanged)
     /// 本次回答注入的文件级明细：fileName / level / tokenEst / truncated / trace
     Q_PROPERTY(QVariantList libraryInjections READ libraryInjections NOTIFY librarySourcesChanged)
+    /// 手动模式下本次待注入的技能 id（最多 2 个；发送后自动清空）
+    Q_PROPERTY(QStringList pendingSkills READ pendingSkills NOTIFY skillSelectionChanged)
+    /// 当前是否手动模式（自动模式下输入区不显示技能选择入口）
+    Q_PROPERTY(bool skillManualMode READ skillManualMode NOTIFY skillSelectionChanged)
 
 public:
     /**
@@ -158,6 +165,15 @@ public:
     Q_INVOKABLE void setMountedCollections(const QVariantList &collectionIds);
     Q_INVOKABLE void clearMountedCollections();
 
+    // ---- 技能（功能 #9）：注入只发生在 system 消息层，不改变流式 / 中断 / Token 统计路径 ----
+    /// 装配技能仓库；可为 nullptr（此时完全不注入技能）
+    void attachSkills(SkillCatalog *skills);
+    QStringList pendingSkills() const;
+    bool skillManualMode() const;
+    /// 手动模式勾选 / 取消勾选；禁用技能与超过 2 个的追加都会被忽略
+    Q_INVOKABLE void togglePendingSkill(const QString &id);
+    Q_INVOKABLE void clearPendingSkills();
+
     // ---- QML 视图：厂商 / 模型 / 参数（UI 只绑定这些，不自行解析 JSON）----
     /// 厂商下拉数据：[{id, displayName, customizable, modelCount, ...}]
     Q_INVOKABLE QVariantList providerOptions() const;
@@ -175,6 +191,9 @@ public:
     /// 属性写入入口（同时供 QML 直接调用）
     Q_INVOKABLE void setModelId(const QString &modelId);
     Q_INVOKABLE void setThinkingLevel(const QString &level);
+    /// 角色卡系统提示词（M18）：切换后对下一条消息生效，不重写历史消息、不入库
+    Q_INVOKABLE void setSystemPrompt(const QString &prompt);
+    QString systemPrompt() const;
     Q_INVOKABLE void setCustomBaseUrl(const QString &baseUrl);
     Q_INVOKABLE void setAdvancedParams(const QVariantMap &params);
     Q_INVOKABLE void clearAdvancedParams();
@@ -210,6 +229,7 @@ signals:
     void providerChanged();
     void modelChanged();
     void thinkingChanged();
+    void systemPromptChanged();
     void credentialChanged();
     void modelListChanged();
     void apiKeyStateChanged();
@@ -221,6 +241,7 @@ signals:
     void webSearchSourcesChanged();
     void libraryChanged();
     void librarySourcesChanged();
+    void skillSelectionChanged();
 
 private:
     void applyLoadedConfig(const AiConfigData &data);
@@ -292,6 +313,8 @@ private:
     QString m_providerId;
     QString m_modelId;
     QString m_thinkingLevel;
+    /// 角色卡系统提示词（M18）：仅内存，随请求注入，不落库、不进会话历史
+    QString m_systemPrompt;
     /// 会话内记忆：每个厂商上次选择的模型（不落盘，避免配置段膨胀）
     QHash<QString, QString> m_modelByProvider;
     /// 动态拉取到的模型清单：providerId -> 模型 id 列表（仅内存，失败不清空）
@@ -349,6 +372,13 @@ private:
     QString m_libraryStatus;
     /// 本轮 assistant 消息 id（citations 外键；会话不可持久化时为 0）
     qint64 m_pendingAssistantMessageId = 0;
+
+    // ---- 技能（功能 #9）----
+    SkillCatalog *m_skills = nullptr;
+    /// 手动模式下本次待注入的技能 id；发送后清空
+    QStringList m_pendingSkills;
+    /// 本轮技能注入的 system 文本（为空表示无命中，不注入）
+    QString buildSkillContext(const QString &userText);
     /// 本轮耗时：从请求发出到结束（失败/重生成同样收尾）
     QElapsedTimer m_roundTimer;
 };

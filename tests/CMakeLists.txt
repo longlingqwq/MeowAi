@@ -29,6 +29,7 @@ meowai_add_test(tst_theme)
 meowai_add_test(tst_provider)
 meowai_add_test(tst_sse)
 meowai_add_test(tst_skill)
+meowai_add_test(tst_skills)
 meowai_add_test(tst_retriever)
 meowai_add_test(tst_chatstore)
 meowai_add_test(tst_themepreset)
@@ -49,6 +50,7 @@ meowai_add_test(tst_referencemode)
 meowai_add_test(tst_libraryservices)
 meowai_add_test(tst_chatfeatures)
 meowai_add_test(tst_libraryurls)
+meowai_add_test(tst_roecard)
 
 # 解析器用例会真跑 PDF 文本层：pdfium.dll 是运行期动态库，需与测试可执行文件同目录
 if(TARGET pdfium)
@@ -67,3 +69,16 @@ target_compile_definitions(tst_cost PRIVATE MEOWAI_SOURCE_DIR="${CMAKE_SOURCE_DI
 target_compile_definitions(tst_chatfeatures PRIVATE MEOWAI_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 # 资料库地址优先级用例同样需要 catalog 数据；Qt Gui 用于构造内置 8x8 PNG
 target_compile_definitions(tst_libraryurls PRIVATE MEOWAI_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+
+# 技能包导入用例需要构造 zip：与 core/skill/SkillInstaller 使用同一套 Qt 私有 zip API。
+# 私有头只在带 private headers 的 Qt 安装中存在；缺失时用例内部 QSKIP。
+if(TARGET Qt6::CorePrivate)
+    target_link_libraries(tst_skills PRIVATE Qt6::CorePrivate)
+    target_compile_definitions(tst_skills PRIVATE MEOWAI_HAVE_QZIPREADER=1)
+endif()
+
+# 注入顺序用例需要读取源码树的 resources/providers.json 构造 ProviderCatalog
+target_compile_definitions(tst_skills PRIVATE MEOWAI_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+
+# 角色卡用例（M18）：ChatController 下发验证需要读取源码树 resources/providers.json
+target_compile_definitions(tst_roecard PRIVATE MEOWAI_SOURCE_DIR="${CMAKE_SOURCE_DIR}")

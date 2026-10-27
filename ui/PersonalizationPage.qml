@@ -402,7 +402,7 @@ Item {
 
                         Text {
                             // 格式与上限对齐 splashDialog 过滤器及 ThemeManager.cpp 的 kVideoLimit
-                            text: qsTr("未设置自定义内容时按当前主题播放内置开屏，设置后以自定义内容为准。播放结束或点击「跳过」即进入主界面。\n支持 MP4 / MOV / M4V / WEBM / MKV / AVI，单个文件不超过 200 MB。")
+                            text: qsTr("未设置自定义内容时按当前主题播放内置开屏，设置后以自定义内容为准。播放结束或点击「跳过」即进入主界面。\n支持 MP4 / MOV / M4V / WEBM / MKV / AVI，单个文件不超过 1 GB。")
                             color: Theme.textFaint
                             font.pixelSize: Theme.fSmall
                             width: Math.min(page.width - 220, 420)

@@ -2,6 +2,7 @@
 #include "core/chat/ChatController.h"
 #include "core/chat/ChatHistoryModel.h"
 #include "core/library/LibraryController.h"
+#include "core/skill/SkillCatalog.h"
 #include "core/theme/ThemeManager.h"
 #include "core/theme/ThemePresetManager.h"
 #include "platform/TitleBarHelper.h"
@@ -44,6 +45,9 @@ int main(int argc, char *argv[])
     // 资料库（v0.2.5）：小库 / 文件 / 索引 / 检索配置 / 成本预估的唯一入口
     engine.rootContext()->setContextProperty(QStringLiteral("Library"),
                                              controller.libraryController());
+    // 技能仓库（功能 #9 · M19）：内置 / 导入技能、启用状态与调用模式的唯一入口
+    engine.rootContext()->setContextProperty(QStringLiteral("Skills"),
+                                             controller.skillCatalog());
     engine.load(QUrl(QStringLiteral("qrc:/qt/qml/MeowAi/ui/main.qml")));
 
     if (engine.rootObjects().isEmpty()) {

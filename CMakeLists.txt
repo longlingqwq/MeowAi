@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.21)
 
 project(MeowAi
-    VERSION 0.2.7.1
+    VERSION 0.2.8
     DESCRIPTION "MeowAi - 本地优先的 AI 助理客户端"
     LANGUAGES CXX
 )
@@ -60,7 +60,11 @@ add_library(MeowAiLib STATIC
     core/retriever/SectionPicker.cpp
     core/retriever/InjectionPlanner.cpp
     core/retriever/FileLevelRetriever.cpp
+    core/skill/SkillCatalog.cpp
+    core/skill/SkillInstaller.cpp
     core/skill/SkillRegistry.cpp
+    core/skill/SkillStateStore.cpp
+    core/skill/SkillCatalog.h     # 含 Q_OBJECT，需显式列出以触发 AUTOMOC
     core/theme/ThemeManager.cpp
     core/theme/ThemePresetManager.cpp
     core/update/UpdateManager.cpp
@@ -89,6 +93,7 @@ add_library(MeowAiLib STATIC
     storage/LibraryConfigStore.cpp
     storage/LibraryStore.cpp
     storage/PersonalizationStore.cpp
+    storage/RoleCardStore.cpp
     storage/SecureStore.cpp
     storage/SqliteVectorIndex.cpp
     storage/ThemeStore.cpp
@@ -112,6 +117,19 @@ if(WIN32)
     target_link_libraries(MeowAiLib PRIVATE crypt32)
     # DWM（DwmSetWindowAttribute）：无边框标题栏关闭系统绘制边框（阶段三）
     target_link_libraries(MeowAiLib PRIVATE dwmapi)
+endif()
+
+# ---------------------------------------------------------------------------
+# 技能包导入（功能 #9 · M19）：Qt 6 没有公开的 zip API，这里用 QtCore 私有 QZipReader。
+# 私有头只在带 private headers 的 Qt 安装中存在：缺失时编译降级实现（导入直接拒绝），
+# 不影响其余功能与构建。
+# ---------------------------------------------------------------------------
+if(TARGET Qt6::CorePrivate)
+    target_link_libraries(MeowAiLib PRIVATE Qt6::CorePrivate)
+    target_compile_definitions(MeowAiLib PRIVATE MEOWAI_HAVE_QZIPREADER=1)
+    message(STATUS "技能包导入：已启用（QtCore QZipReader）")
+else()
+    message(STATUS "技能包导入：已禁用（当前 Qt 安装缺少 private headers）")
 endif()
 
 # ---------------------------------------------------------------------------
@@ -160,10 +178,14 @@ qt_add_qml_module(MeowAi
         ui/AvatarCrop.qml
         ui/ModelMenu.qml
         ui/WebSearchPanel.qml
+        # 角色卡（M18）：侧栏区块的管理面板与新建 / 编辑表单
+        ui/RoleCardPanel.qml
+        ui/RoleCardDialog.qml
         # 页面
         ui/ConversationPage.qml
         ui/PersonalizationPage.qml
         ui/LibraryPage.qml
+        ui/SkillLibraryPage.qml
         ui/LibraryConsent.qml
         ui/SplashVideo.qml
         ui/SplashIntro.qml

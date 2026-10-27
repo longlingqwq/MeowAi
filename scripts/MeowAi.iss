@@ -1,10 +1,10 @@
 ﻿; MeowAi Windows 安装包脚本（Inno Setup 6）
 ; 编译：ISCC.exe scripts\MeowAi.iss
-; 产物：dist\MeowAi-Setup-0.2.7.1.exe
+; 产物：dist\MeowAi-Setup-0.2.8.exe
 ; 说明：按用户安装（无需管理员权限），默认装到 %LOCALAPPDATA%\Programs\MeowAi
 
 #define AppName "MeowAi"
-#define AppVersion "0.2.7.1"
+#define AppVersion "0.2.8"
 #define AppPublisher "Longling"
 #define AppExe "MeowAi.exe"
 

@@ -12,17 +12,56 @@ import QtQuick
 Item {
     id: sidebar
 
-    /// 当前页（0 对话 / 1 个性化 / 2 资料库）
+    /// 当前页（0 对话 / 1 个性化 / 2 资料库 / 3 技能仓库）
     property int pageIndex: 0
     /// 是否缩回为窄条（约 64px）
     property bool navCollapsed: false
     /// 对话列表是否展开
     property bool conversationExpanded: true
 
+    /// 角色卡（M18）：列表数据与「当前生效」卡 id（仅内存，重启后自然回到未套用态）
+    property var roleCards: []
+    property int activeRoleCardId: -1
+
     signal pageRequested(int index)
     signal navCollapsedRequested(bool collapsed)
     signal conversationExpandedRequested(bool expanded)
     signal newConversationRequested()
+
+    function refreshRoleCards() {
+        roleCards = (App.roleCardStore && App.roleCardStore.available)
+                    ? App.roleCardStore.list() : []
+    }
+
+    /// 套用角色卡：模型、档位、系统提示词三项一起生效；头像只作展示
+    function applyRoleCard(card) {
+        if (!card)
+            return
+        if (card.providerId && card.providerId.length > 0)
+            Chat.setProvider(card.providerId)
+        if (card.modelId && card.modelId.length > 0)
+            Chat.setModelId(card.modelId)
+        if (card.thinkingLevel && card.thinkingLevel.length > 0)
+            Chat.setThinkingLevel(card.thinkingLevel)
+        Chat.systemPrompt = card.systemPrompt !== undefined ? card.systemPrompt : ""
+        activeRoleCardId = card.id
+    }
+
+    /// 删除当前生效卡后的收尾：模型与档位保持最后状态，仅清空系统提示词
+    function clearActiveRoleCard() {
+        if (activeRoleCardId < 0)
+            return
+        activeRoleCardId = -1
+        Chat.systemPrompt = ""
+    }
+
+    Component.onCompleted: refreshRoleCards()
+
+    // 角色卡数据变化（增删改 / 导入导出）即时刷新侧栏列表
+    Connections {
+        target: App.roleCardStore
+        function onChanged() { sidebar.refreshRoleCards() }
+    }
 
     width: navCollapsed ? 64 : 228
     clip: true
@@ -145,7 +184,7 @@ Item {
             anchors.left: parent.left
             anchors.right: parent.right
             anchors.top: topColumn.bottom
-            anchors.bottom: bottomColumn.top
+            anchors.bottom: roleCardColumn.top
             anchors.leftMargin: Theme.s2
             anchors.rightMargin: Theme.s2
             anchors.topMargin: Theme.s2
@@ -156,7 +195,180 @@ Item {
             onNewConversationRequested: History.newConversation()
         }
 
-        // 底部导航：个性化 / 资料库
+        // 角色卡（M18）：位于会话列表与底部导航之间；点击即套用
+        Column {
+            id: roleCardColumn
+            anchors.left: parent.left
+            anchors.right: parent.right
+            anchors.bottom: bottomColumn.top
+            anchors.leftMargin: Theme.s2
+            anchors.rightMargin: Theme.s2
+            anchors.bottomMargin: Theme.s2
+            spacing: Theme.s1
+
+            // 标题行：区块名 + 管理入口
+            Item {
+                width: parent.width
+                height: 18
+
+                Text {
+                    anchors.left: parent.left
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: qsTr("角色卡")
+                    color: Theme.textFaint
+                    font.pixelSize: Theme.fLabel
+                    font.weight: Font.DemiBold
+                }
+
+                Text {
+                    anchors.right: manageButton.left
+                    anchors.rightMargin: Theme.s2
+                    anchors.verticalCenter: parent.verticalCenter
+                    visible: sidebar.activeRoleCardId >= 0
+                    text: qsTr("已套用")
+                    color: Theme.accent
+                    font.pixelSize: Theme.fLabel
+                }
+
+                MButton {
+                    id: manageButton
+                    anchors.right: parent.right
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: qsTr("管理")
+                    variant: "quiet"
+                    small: true
+                    onClicked: roleCardPanel.open()
+                }
+            }
+
+            // 卡片行：头像 + 名称 + 当前模型；当前生效卡高亮
+            ListView {
+                width: parent.width
+                height: sidebar.roleCards.length > 0
+                        ? Math.min(sidebar.roleCards.length, 4) * 34 : 0
+                clip: true
+                visible: sidebar.roleCards.length > 0
+                model: sidebar.roleCards
+                spacing: 2
+
+                delegate: Item {
+                    width: ListView.view.width
+                    height: 32
+
+                    required property var modelData
+                    readonly property bool isActive: modelData.id === sidebar.activeRoleCardId
+
+                    Rectangle {
+                        anchors.fill: parent
+                        radius: Theme.rMd
+                        color: isActive ? Theme.accentGhost
+                                        : (cardHover.hovered ? Theme.overlayFaint : "transparent")
+
+                        Behavior on color {
+                            ColorAnimation { duration: Theme.dFast }
+                        }
+                    }
+
+                    Rectangle {
+                        visible: isActive
+                        anchors.left: parent.left
+                        anchors.verticalCenter: parent.verticalCenter
+                        width: 2
+                        height: 16
+                        radius: 1
+                        color: Theme.accent
+                    }
+
+                    Row {
+                        id: cardRow
+                        anchors.fill: parent
+                        anchors.leftMargin: Theme.s2 + 2
+                        anchors.rightMargin: Theme.s2
+                        spacing: Theme.s2
+
+                        MAvatar {
+                            anchors.verticalCenter: parent.verticalCenter
+                            width: 22
+                            height: 22
+                            source: modelData.avatarUrl || ""
+                            fallbackText: (modelData.name || "?").charAt(0).toUpperCase()
+                        }
+
+                        Text {
+                            anchors.verticalCenter: parent.verticalCenter
+                            // 名称优先占用剩余宽度；模型名最多占一半，超出用省略号，绝不撑破侧栏
+                            width: Math.max(28, cardRow.width - 22 - Theme.s2 * 2
+                                            - modelLabel.width)
+                            text: modelData.name || ""
+                            color: isActive ? Theme.text : Theme.textDim
+                            font.pixelSize: Theme.fSmall
+                            font.weight: isActive ? Font.DemiBold : Font.Normal
+                            elide: Text.ElideRight
+                        }
+
+                        Text {
+                            id: modelLabel
+                            anchors.verticalCenter: parent.verticalCenter
+                            width: Math.min(implicitWidth, Math.round(cardRow.width * 0.45))
+                            horizontalAlignment: Text.AlignRight
+                            // 默认卡（未锁定模型）展示其套用时会真正使用的当前模型
+                            text: {
+                                if (modelData.modelId && modelData.modelId.length > 0)
+                                    return modelData.modelId
+                                if (Chat.modelId && Chat.modelId.length > 0)
+                                    return Chat.modelId
+                                return qsTr("默认")
+                            }
+                            color: Theme.textFaint
+                            font.pixelSize: Theme.fLabel
+                            elide: Text.ElideRight
+                        }
+                    }
+
+                    HoverHandler { id: cardHover }
+
+                    MouseArea {
+                        anchors.fill: parent
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: sidebar.applyRoleCard(modelData)
+                    }
+                }
+            }
+
+            // 空态：引导去管理面板新建 / 导入
+            Text {
+                width: parent.width
+                visible: sidebar.roleCards.length === 0
+                text: qsTr("暂无角色卡 · 点「管理」新建")
+                color: Theme.textGhost
+                font.pixelSize: Theme.fLabel
+                elide: Text.ElideRight
+            }
+        }
+
+        // 角色卡管理面板（M18）：Popup 挂在 Overlay 上，这里只负责接线
+        RoleCardPanel {
+            id: roleCardPanel
+            activeCardId: sidebar.activeRoleCardId
+            onActiveCardRemoved: (cardId) => {
+                sidebar.clearActiveRoleCard()
+                roleCardPanel.noticeMessage =
+                    qsTr("已删除当前生效的角色卡：模型与档位保持不变，系统提示词已清空。")
+            }
+            onSaved: (cardId) => {
+                // 编辑的是当前生效卡：保存后自动重套用，提示词立即跟随最新内容
+                if (cardId >= 0 && cardId === sidebar.activeRoleCardId) {
+                    for (let i = 0; i < sidebar.roleCards.length; ++i) {
+                        if (sidebar.roleCards[i].id === cardId) {
+                            sidebar.applyRoleCard(sidebar.roleCards[i])
+                            break
+                        }
+                    }
+                }
+            }
+        }
+
+        // 底部导航：个性化 / 资料库 / 技能仓库
         Column {
             id: bottomColumn
             anchors.left: parent.left
@@ -185,6 +397,14 @@ Item {
                 mono: qsTr("资")
                 active: sidebar.pageIndex === 2
                 onActivated: sidebar.pageRequested(2)
+            }
+
+            // 技能仓库（功能 #9 · M19）：内置 / 导入技能的列表、导入、启用与模式开关
+            NavItem {
+                label: qsTr("技能仓库")
+                mono: qsTr("技")
+                active: sidebar.pageIndex === 3
+                onActivated: sidebar.pageRequested(3)
             }
         }
     }
@@ -285,6 +505,14 @@ Item {
                 active: sidebar.pageIndex === 2
                 collapsed: true
                 onActivated: sidebar.pageRequested(2)
+            }
+
+            NavItem {
+                label: qsTr("技能仓库")
+                mono: qsTr("技")
+                active: sidebar.pageIndex === 3
+                collapsed: true
+                onActivated: sidebar.pageRequested(3)
             }
         }
     }

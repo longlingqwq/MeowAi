@@ -1,8 +1,8 @@
 # MeowAi 开发 / 运维 / 销售参考手册
 
-> 版本：v0.2.7.1
+> 版本：v0.2.8
 > 读者：接手开发的人、负责交付和排障的人、对外演示和销售的人
-> 口径：本手册以 v0.2.7.1 分支 HEAD 的代码、`CMakeLists.txt`、`resources/providers.json`、`.git` 和 `docs/DEVLOG.md` 为准。v0.2.7.1 无 DEVLOG 条目，变更证据来自该分支提交。状态分为已交付、待验收、骨架、未实现。骨架表示有代码或接口但未接入主流程；未实现表示没有可用功能。
+> 口径：本手册以 v0.2.8 分支 HEAD 的代码、`CMakeLists.txt`、`resources/providers.json`、`.git` 和 `docs/DEVLOG.md` 为准。v0.2.8 的变更证据是 DEVLOG 的「M18 角色卡并入 M19 工作区」与「Skill 仓库与技能调用」两条记录。状态分为已交付、待验收、骨架、未实现。骨架表示有代码或接口但未接入主流程；未实现表示没有可用功能。
 
 ---
 
@@ -41,7 +41,7 @@ MeowAi 是 Windows 桌面 AI 对话客户端。它不内置大模型，不在本
 | 回答复制与重新生成 | 助手消息下方按钮 | 已交付 | `ChatController::regenerateLast`、QML 剪贴板 |
 | 文字与图片分享 | 助手消息下方按钮 | 已交付 | `ConversationPage.shareImage`，`grabToImage` 保存 PNG |
 | Markdown 渲染 | 助手消息 | 已交付 | `ChatController::renderMarkdown` |
-| Token 与耗时 | 助手消息底部 | 已交付 | `ChatUsage`、数据库 schema v4 |
+| Token 与耗时 | 助手消息底部 | 已交付 | `ChatUsage`、`messages` 用量列（schema v4 引入） |
 | 附图对话 | 输入条“附图” | 已交付 | `ChatController::sendWithImage`、`imagesConfirmed` |
 | 智能联网 | 输入条“联网搜索”开关 | 已交付 | `core/web/WebSearchService.*`、`WebSearchTool.*`、工具循环 |
 | 资料库导入与索引 | 资料库页 | 已交付 | `LibraryController`、`LibraryIndexer`、`core/library/extract/*` |
@@ -53,12 +53,15 @@ MeowAi 是 Windows 桌面 AI 对话客户端。它不内置大模型，不在本
 | 主题 | 个性化页 | 已交付 | `ThemeManager`、`resources/themes/theme1.json`、`theme2.json` |
 | 字体/背景/头像 | 个性化页 | 已交付 | `ThemeManager`、`AvatarCrop.qml`（512×512） |
 | 内置开屏 | 启动时 | 已交付 | `SplashIntro.qml`（约 3.5 秒，按主题，可跳过） |
-| 自定义开屏视频 | 个性化页 | 已交付 | `SplashVideo.qml`，上限 200 MB |
+| 自定义开屏视频 | 个性化页 | 已交付 | `SplashVideo.qml`，上限 1 GB |
+| 角色卡 | 侧栏「角色卡」区块 + 管理面板 | 已交付（待验收） | `RoleCardStore`、`RoleCardPanel.qml`、`RoleCardDialog.qml`；schema v5 的 `role_cards` 表；套用 = 模型 + 档位 + 系统提示词 |
+| 角色卡导入导出 | 管理面板「导入」「导出」 | 已交付（待验收） | `RoleCardStore::exportToFile` / `importFromFile`（preview / skip / overwrite 三模式） |
+| Skill 仓库与技能调用 | 侧栏「技能仓库」+ 输入区手动选择 | 已交付（待验收） | `SkillCatalog` / `SkillInstaller` / `SkillStateStore`；自动按触发词、手动按选择 |
+| 技能包导入 | 技能仓库页右上角 | 已交付（待验收） | `SkillInstaller`、zip 中央目录自解析校验、依赖 `Qt6::CorePrivate` |
 | 应用图标与品牌 | 安装包/标题栏 | 已交付 | `resources/branding/*`、`MeowAi.rc` |
 | 文件分类 | 无界面入口 | 骨架 | `CategoryManager` 返回空结果 |
 | 修改前备份 | 无界面入口 | 骨架 | `BackupManager` 返回空 |
 | 应用内升级 | 无界面入口 | 骨架 | `UpdateManager::checkForUpdates` 发 `checkFailed` |
-| Skill 调用 | 无入口 | 未实现 | `SkillRegistry` 只扫描清单，不接入对话 |
 | 视频解析 | 无 | 未实现 | `VideoExtractor` 只登记，不产出文本 |
 | OCR | 无 | 未实现 | 扫描版 PDF 无文本层 |
 | Android / Web 客户端 | 无 | 骨架 | `WebPlatformAdapter` 等，无安装包 |
@@ -88,6 +91,29 @@ MeowAi 是 Windows 桌面 AI 对话客户端。它不内置大模型，不在本
 
 主题与个性化。`ThemeManager` 读取 `resources/themes/theme1.json` 与 `theme2.json`，把颜色、圆角、字号映射成 QML 可读属性。字体、背景、头像、开屏视频复制到 `assets/`。头像经 `AvatarCrop.qml` 裁剪成 512×512。开屏优先自定义视频；没有视频时用 `SplashIntro.qml` 按当前主题播放内置动画。`PersonalizationStore` 持久化开关和文件路径。
 
+角色卡。`RoleCardStore` 在 schema v5 的 `role_cards` 表上做 CRUD，头像复制进 `assets/rolecards/`，库里只存相对路径，删除卡时只清理托管目录内的文件。套用发生在 QML 侧（`Sidebar.applyRoleCard`）：依次调 `Chat.setProvider` / `setModelId` / `setThinkingLevel`，再写 `Chat.systemPrompt`，三项一起生效。当前生效卡 id 存在 `Sidebar.activeRoleCardId`（**内存态**，不入库，重启回到未套用）。表单里厂商 / 模型 / 档位三处的「默认」用空串表示，套用时跳过该字段，因此同一张卡可在不同厂商间复用。
+
+角色卡导入。`importFromFile(path, mode)` 的 `mode` 决定副作用分档：`preview` 只解析并回传冲突名单、**一行库都不写**；`skip` 跳过同名；`overwrite` 覆盖同名但保留原 id 与创建时间。UI 必须先走 `preview`，只有用户显式点了覆盖或跳过才进入后两种模式，避免静默覆盖。定义非法（缺 name、JSON 结构不对）的条目计入 `invalid`，不影响其余条目导入。
+
+系统提示注入。这是 M18 与 M19 合并后**必须保持的固定契约**，改动顺序会破坏模型对人格设定的理解：
+
+```
+request.messages = [
+  system: 角色卡提示词        ← index 0，人格设定，空则整条不下发
+  system: 当前时间             ← 总是存在
+  system: 技能文档             ← 无命中则不下发
+  system: 资料库检索上下文      ← 无召回则不下发
+  ...历史消息
+  user:   本轮用户消息
+]
+```
+
+实现位置在 `ChatController::send`：先 `prepend` 时间，再用 `slot` 游标从 0 起依次插入角色卡、技能、资料库。角色卡存在时 `slot` 从 1 起算，因为时间已被顶到 index 1。角色卡提示词的 token 也计入资料库注入预算（`handleLibraryRetrievalFinished` 里 `historyTokens += estimateTokens(m_systemPrompt)`），保证两者合计不超既有预算。
+
+技能仓库。`SkillRegistry` 只负责扫描与解析 manifest；`SkillCatalog` 在其上做合并（内置 + 导入）、启停、模式与**注入编排**；`SkillInstaller` 管 zip 导入与安全校验；`SkillStateStore` 读写 `%APPDATA%\MeowAi\MeowAi\skills_state.json`（`{version, mode, enabled{id:bool}}`，**刻意不建数据库表**，避开 schema 迁移）。自动模式匹配规则：触发词不区分大小写、支持中文子串，主排序为触发词在输入中**首次出现位置**，同位置按目录顺序，最多 2 个。手动模式由输入区选择，`ChatController` 只消费当次结果。全部技能内容合计 4000 字符硬截断，不加任何提示。
+
+技能包导入安全。单包 ≤ 20 MB、解压后 ≤ 100 MB、条目 ≤ 2000。条目名**自解析 zip 中央目录**校验，不信任 `QZipReader`（它会把 `../x` 静默改写成 `x`，只有读原始字节才能真拒绝而非悄悄纠正）。拒绝绝对路径、盘符、符号链接、多 manifest。`id` 仅允许 `[A-Za-z0-9-]`，`entry` 必须是 `skill.md` 且非空。与内置同 id 拒绝并要求改名；与用户已有技能同 id 按覆盖更新。依赖 Qt 私有头 `QZipReader`（`Qt6::CorePrivate`），缺私有头时 `MEOWAI_HAVE_QZIPREADER` 未定义，导入降级为「一律拒绝」。
+
 ---
 
 ## 5. 部署与分发
@@ -110,13 +136,13 @@ cmake --build build --config Debug --target meowai_tests
 ctest --test-dir build -C Debug --output-on-failure
 ```
 
-当前 `tests/CMakeLists.txt` 注册 26 个测试目标，覆盖存储、密钥、主题、厂商解析、SSE、工具循环、资料库、检索、参考资料模式、会话用量、资料库服务与冒烟。测试文件顶部注释仍写“21 个”，属于注释过期，以 26 为准。
+当前 `tests/CMakeLists.txt` 注册 28 个测试目标，覆盖存储、密钥、主题、厂商解析、SSE、工具循环、资料库、检索、参考资料模式、会话用量、资料库服务、技能仓库、角色卡与冒烟。测试文件顶部注释仍写“21 个”，属于注释过期，以 28 为准。
 
 PDFium。PDF 解析依赖 `third_party/pdfium`。运行 `pwsh scripts/fetch-pdfium.ps1` 下载；未放置 PDFium 时项目仍可构建，但 PDF 会走“无文本层”分支。仓库当前没有 `third_party/pdfium`，因此直接从源码构建得到的程序不能解析 PDF。DEVLOG 记录发布安装包内置 PDFium，但仓库没有保留安装包解包内容，产物内部是否包含无法从源码核对。
 
-打包。先构建 Release，再用 `windeployqt --release --qmldir ui` 把 `MeowAi.exe` 与 Qt 运行库部署到临时目录，最后编译安装脚本。仓库内提供 Inno Setup 脚本 `scripts/MeowAi.iss`，`#define AppVersion "0.2.7.1"`，输出 `dist\MeowAi-Setup-0.2.7.1.exe`。本地实际打包另用 NSIS 脚本 `build-mingw\dist\MeowAi.nsi`（构建目录，不纳入版本库），版本字段同为 0.2.7.1，图标取自 `resources/branding/app.ico`。两种安装程序都按当前用户安装，默认目录 `C:\Users\<用户名>\AppData\Local\Programs\MeowAi`，不需要管理员权限。安装包内附带 `docs/USER_GUIDE.md`，个性化页的“打开用户手册”直接定位到该文件；发布时把安装包和两份手册放进同一个发放目录。
+打包。先构建 Release，再用 `windeployqt --release --qmldir ui` 把 `MeowAi.exe` 与 Qt 运行库部署到临时目录，最后编译安装脚本。仓库内提供 Inno Setup 脚本 `scripts/MeowAi.iss`，`#define AppVersion "0.2.8"`，输出 `dist\MeowAi-Setup-0.2.8.exe`。本地实际打包另用 NSIS 脚本 `build-mingw\dist\MeowAi.nsi`（构建目录，不纳入版本库），版本字段需同步为 0.2.8，图标取自 `resources/branding/app.ico`。两种安装程序都按当前用户安装，默认目录 `C:\Users\<用户名>\AppData\Local\Programs\MeowAi`，不需要管理员权限。安装包内附带 `docs/USER_GUIDE.md`，个性化页的“打开用户手册”直接定位到该文件；发布时把安装包和两份手册放进同一个发放目录。
 
-当前交付状态。`产品/` 目录里有 `MeowAi-Setup-0.2.7.1.exe`（NSIS 构建，约 33.3 MB）与 `MeowAi-Setup-0.2.7.exe`（历史产物）。`产品/` 被 `.gitignore` 忽略，不在版本库内。仓库没有 `dist/`。`scripts/MeowAi.iss` 的版本号已随 v0.2.7.1 提交。
+当前交付状态。`产品/` 目录里有 `MeowAi-Setup-0.2.7.1.exe`（NSIS 构建，约 33.3 MB）与 `MeowAi-Setup-0.2.7.exe`（历史产物）。`产品/` 被 `.gitignore` 忽略，不在版本库内。仓库没有 `dist/`。`scripts/MeowAi.iss` 的版本号已随 v0.2.8 提交为 `0.2.8`，但 **v0.2.8 安装包尚未重建**，`产品/` 里仍是 0.2.7.1 的产物；需要发布时按 `#define AppVersion` 重新编译安装脚本。
 
 冒烟检查。`MeowAi.exe --smoke-test` 在主界面加载后立即退出。退出码 0 只说明 QML 根对象加载成功，不覆盖配置、网络、数据库和资料库功能。程序是 WIN32 GUI 子系统，终端看不到标准输出，但可以读退出码：
 
@@ -155,7 +181,7 @@ PDF 无文本层。确认构建时是否启用 PDFium。源码构建默认没有
 
 升级失败。当前没有应用内升级。`UpdateManager` 只返回失败信号。手动下载新安装包覆盖安装，数据目录保留。
 
-开屏异常。内置开屏不播放时看“启动时播放”开关。自定义视频不播放时看编码和体积上限 200 MB。视频损坏会回退到内置开屏。开屏期间点“跳过”应直接进入主界面。
+开屏异常。内置开屏不播放时看“启动时播放”开关。自定义视频不播放时看编码和体积上限 1 GB。视频损坏会回退到内置开屏。开屏期间点“跳过”应直接进入主界面。
 
 头像不显示。看 `assets/` 下是否有裁剪结果，看图片是否损坏。裁剪输出固定 512×512，源图过小会提示加载失败。
 
@@ -163,7 +189,9 @@ PDF 无文本层。确认构建时是否启用 PDFium。源码构建默认没有
 
 ## 7. 进度与路线
 
-已交付到 v0.2.7.1。Windows 主链路完整：配置、对话、联网、资料库、参考模式、个性化、开屏、安装包。
+已交付到 v0.2.8。Windows 主链路完整：配置、对话、联网、资料库、参考模式、个性化、开屏、角色卡、技能仓库、安装包。
+
+v0.2.8 相比 v0.2.7.1 的增量：M18 角色卡（schema v5 + 侧栏区块 + 管理面板 + 导入导出）与 M19 技能系统（技能仓库页 + 技能包导入 + 自动/手动注入）合并进同一工作区，两者在 system 提示注入上合并成一条固定契约。
 
 当前优先级最高的收尾项：
 
@@ -172,8 +200,9 @@ PDF 无文本层。确认构建时是否启用 PDFium。源码构建默认没有
 3. 在干净 Windows 虚拟机上做一次安装、升级、卸载验收。
 4. 确认发布包是否内置 PDFium，并把结论写进发布说明。
 5. 补资料库同意文案与实现的定期回归，避免文案再次出现“另行同意图片外发”。
+6. 角色卡与技能仓库人工过一遍 UI 验收（导入冲突三模式、删除生效卡提示、两套主题下的卡片样式）。
 
-未排期的模块：文件分类、修改前备份、应用内升级、Skill 调用、视频解析、OCR、Android/Web 客户端。这些模块目前只有骨架或未实现，不能对外承诺日期。
+未排期的模块：文件分类、修改前备份、应用内升级、视频解析、OCR、Android/Web 客户端、会话切换页、Agent 隔离区。这些模块目前只有骨架或未实现，不能对外承诺日期。
 
 ---
 
@@ -187,13 +216,17 @@ PDF 无文本层。确认构建时是否启用 PDFium。源码构建默认没有
 - 安装向导只有英文。
 - 应用内升级是骨架，检查更新必定失败。
 - 文件分类和修改前备份是骨架，界面没有入口。
-- Skill 只扫描清单，不接入对话。
+- **当前生效的角色卡是内存态**：只存在 `Sidebar.activeRoleCardId`，重启回到未套用。系统提示词同理不落盘，与「切换只影响下一条消息」的设计一致。
+- **角色卡与技能包的导入 / 导出 UI 未取到自动化截图**：本机桌面被其他顶层窗口抢占前景，原生 `FileDialog` 既不出现在 `EnumWindows` 顶层列表，`PrintWindow` 也抓不到。这两条链路的逻辑由 `tst_roecard`（含冲突三模式）与 `tst_skills` 覆盖，仍需人工 UI 验收。
+- **技能包导入依赖 Qt 私有头** `QZipReader`（`Qt6::CorePrivate`）。Qt 升级需回归；不支持 ZIP64；缺私有头时导入整体降级为拒绝。
+- **注入顺序是契约，不是实现细节**：`角色卡 → 当前时间 → 技能 → 资料库`。改动顺序会破坏模型对人格设定的理解，`tst_skills::injectionOrderRoleCardFirstThenTimeThenSkill` 与 `tst_roecard::systemPromptInjectedAsFirstSystemMessage` 同时锁定这一点，改代码前后都必须让它们通过。
+- Skill 已接入对话（自动注入 / 手动选择），但只做「提示词注入」，不提供工具调用能力。
 - 视频只登记，不解析；扫描版 PDF 不做 OCR。
 - Android 与 Web 只有平台适配骨架；iOS 未开始。
 - Linux 和 macOS 没有真实密钥加密，也没有安装包。
 - 数据目录不提供自动备份。用户需要手动复制。
 - 会话删除、文件移除、恢复默认外观都没有二次确认。
-- 测试注释写“21 个”，实际 26 个。
+- 测试头部注释写“21 个”，实际 28 个（以 `tests/CMakeLists.txt` 为准）。
 
 ---
 
@@ -214,10 +247,14 @@ PDF 无文本层。确认构建时是否启用 PDFium。源码构建默认没有
 11. 配置 embedding 与 caption，点“拉取模型”“验证可用性”，重建索引。
 12. 回到对话，挂载小库，提问文件里的细节，展示引用和参考资料模式。
 13. 切到个性化，切换两套主题，预览内置开屏，演示头像裁剪。
-14. 打开帮助，点“打开用户手册”，展示随包文档。
-15. 最后说明边界：分类、备份、升级、Skill、视频、OCR 尚未交付。
+14. 打开角色卡区块，点一张卡演示模型 / 档位 / 提示词三项联动切换，再进「管理」演示新增、编辑与导出。
+15. 切到技能仓库，演示自动 / 手动模式切换，选一个技能在对话里手动调用一次。
+16. 打开帮助，点“打开用户手册”，展示随包文档。
+17. 最后说明边界：分类、备份、升级、视频、OCR、会话切换页、Agent 隔离区尚未交付。
 
-演示时不要说“自动更新”“本地大模型”“OCR 识别扫描件”“Skill 已接入”“Android 可用”。这些都不成立。
+演示时不要说“自动更新”“本地大模型”“OCR 识别扫描件”“Android 可用”。角色卡与技能仓库可以说「已实现、待验收」，不要承诺稳定性或兼容性。
+
+演示角色卡的提示词注入时，不要切到没有 Key 的厂商然后再提问——会看到错误横幅，容易被误认为功能故障。
 
 ---
 
@@ -256,7 +293,12 @@ PDF 无文本层。确认构建时是否启用 PDFium。源码构建默认没有
 | 同意层 | 首次外发资料库内容前的隐私确认界面 |
 | 安全开关 | 控制是否允许把图片上传给厂商 |
 | 内置开屏 | 按主题播放的品牌动画，约 3.5 秒 |
-| Skill | 预留的扩展能力清单，当前只扫描不调用 |
+| 角色卡 | 一组「模型 + 档位 + 系统提示词」的命名预设，点击即整套套用 |
+| 套用 | 把角色卡的模型、档位、提示词三项一起写进当前对话配置 |
+| 系统提示词 | 每次请求作为第一条 system 消息下发的人格设定，不落库 |
+| 技能 / Skill | 由 `manifest.json` + `skill.md` 组成的扩展包，按触发词或手动选择注入 |
+| 触发词 | 技能声明的匹配词，命中后自动模式才会注入该技能 |
+| 技能包 | 用于导入技能的 zip，含 manifest 与文档，需通过体量与条目名校验 |
 | 骨架 | 有接口或文件，但没有接入主流程 |
 | smoke test | 只验证主界面能加载的冒烟检查 |
 
@@ -264,9 +306,11 @@ PDF 无文本层。确认构建时是否启用 PDFium。源码构建默认没有
 
 ## 12. 对外沟通统一口径
 
-可以说：Windows 桌面 AI 对话客户端；用户自备厂商 Key；本地保存会话和资料库；支持 PDF、Word、Excel、PPT 和图片入库；检索结果可追溯；资料外发需要明确同意；有两套主题和内置开屏；有 Windows 安装包。
+可以说：Windows 桌面 AI 对话客户端；用户自备厂商 Key；本地保存会话和资料库；支持 PDF、Word、Excel、PPT 和图片入库；检索结果可追溯；资料外发需要明确同意；有两套主题和内置开屏；有 Windows 安装包；**支持角色卡（一键切换模型 / 档位 / 人格提示词）与技能仓库（按触发词自动注入或手动选择）**。
 
-不能说：内置大模型；本地推理；自动升级；Skill 已接入；视频理解；OCR 识别扫描件；Android/Web 已可用；密钥在 Linux/macOS 也加密；CI 已验证全部测试；安装包一定包含 PDFium。
+不能说：内置大模型；本地推理；自动升级；视频理解；OCR 识别扫描件；Android/Web 已可用；密钥在 Linux/macOS 也加密；CI 已验证全部测试；安装包一定包含 PDFium；角色卡能跨设备同步；角色卡重启后保持套用；技能包可以装任意第三方代码。
+
+角色卡与技能仓库对外统一表述为「已实现，待验收」。
 
 价格和模型能力以厂商当期文档为准。不要承诺固定价格、固定速率或固定模型清单。
 
@@ -289,20 +333,20 @@ MeowAi/
 │  ├─ retriever/            RagRetriever、FileLevelRetriever、BudgetCalculator 等
 │  ├─ web/                  WebSearchService、WebSearchTool
 │  ├─ theme/                ThemeManager、ThemePresetManager
-│  ├─ skill/SkillRegistry.* 只扫描清单
+│  ├─ skill/                SkillRegistry、SkillCatalog、SkillInstaller、SkillStateStore
 │  └─ update/UpdateManager.* 骨架
 ├─ providers/               OpenAI、Anthropic、SSE 解析、ChatTypes
 ├─ storage/                 Database、各 Store、AppPaths、SecureStore
 ├─ platform/                PlatformAdapter 与 desktop/web 实现
 ├─ ui/                      QML 页面、组件、开屏、裁剪
 ├─ resources/               providers.json、pricing.json、themes、branding、splash、skills
-├─ tests/                   26 个测试目标
-├─ scripts/                 MeowAi.iss、fetch-pdfium.ps1
+├─ tests/                   28 个测试目标
+├─ scripts/                 MeowAi.iss、fetch-pdfium.ps1、m18_shot.py（GUI 截图辅助）
 ├─ docs/                    规范、计划、日志、两份手册
 └─ 产品/                    本地发放目录，被 gitignore
 ```
 
-数据库 schema 版本 4。
+数据库 schema 版本 5。
 
 | 版本 | 表 |
 | --- | --- |
@@ -310,6 +354,9 @@ MeowAi/
 | v2 | `collections`、`library_files`、`file_collections`、`folder_links`、`chunks`、`chunk_vectors`、`citations`、`chunk_fts` |
 | v3 | `documents`、`sections` |
 | v4 | `messages` 增加 `prompt_tokens`、`completion_tokens`、`total_tokens`、`elapsed_ms` |
+| v5 | `role_cards`（`id` / `name` / `avatar_path` / `system_prompt` / `provider_id` / `model_id` / `thinking_level` / `created_at` / `updated_at`，`name` 唯一索引） |
+
+系统提示注入顺序（固定契约，不可随意调整）：**角色卡提示词 → 当前时间 → 技能 → 资料库检索上下文**。角色卡是人格设定，必须是第一条 system 消息；其余三者都只是背景资料。角色卡提示词 token 计入资料库注入预算，两者合计不超既有预算；提示词为空（含纯空白）时不下发空 system 消息。
 
 配置分段落：`ai`（厂商、模型、档位、高级参数、自定义端点）、`library`（检索参数、参考资料模式、embedding、caption）、`web`（搜索端点与开关）、`theme`（主题、字体、背景、头像、开屏）、`personalization`（开关状态）。
 
@@ -327,11 +374,11 @@ $LASTEXITCODE
 pwsh scripts/fetch-pdfium.ps1
 ```
 
-打包命令：用 Inno Setup 编译器打开 `scripts/MeowAi.iss`，先确认 `#define AppVersion "0.2.7.1"`，再编译。产物复制到 `产品/`，同时复制 `docs/USER_GUIDE.md` 和 `docs/DEVELOPER_GUIDE.md`。用 NSIS 打包时，先确认 `build-mingw\dist\MeowAi.nsi` 中的 `APP_VERSION`、`Name`、`OutFile`、`VIProductVersion`、`FileVersion`、`ProductVersion`、`DisplayVersion` 七处版本号一致，再执行 `makensis build-mingw\dist\MeowAi.nsi`。
+打包命令：用 Inno Setup 编译器打开 `scripts/MeowAi.iss`，先确认 `#define AppVersion "0.2.8"`，再编译。产物复制到 `产品/`，同时复制 `docs/USER_GUIDE.md` 和 `docs/DEVELOPER_GUIDE.md`。用 NSIS 打包时，先确认 `build-mingw\dist\MeowAi.nsi` 中的 `APP_VERSION`、`Name`、`OutFile`、`VIProductVersion`、`FileVersion`、`ProductVersion`、`DisplayVersion` 七处版本号一致，再执行 `makensis build-mingw\dist\MeowAi.nsi`。
 
 ---
 
-## 14. 版本变更记录（v0.1.0 → v0.2.7.1）
+## 14. 版本变更记录（v0.1.0 → v0.2.8）
 
 仓库没有 annotated tag 历史，原有版本标识实际是分支 ref。2026-10-22 为 v0.2.3、v0.2.4 补建了本地 annotated tag，均指向合并提交 `9661eff`；标签未推送远端。
 
@@ -346,6 +393,7 @@ pwsh scripts/fetch-pdfium.ps1
 | v0.2.6 | 2026-10-21 | `9bbe54f` | HEAD 前代；基线 `ce1bdae` 无 ref；DEVLOG L42–121 |
 | v0.2.7 | 2026-10-22 | `5622ac4` | 基线 `ca2d4a5`；`origin/v0.2.7`；DEVLOG 无记录 |
 | v0.2.7.1 | 2026-10-24 | `82527b0` | 基线 `ad3e664`；`origin/v0.2.7.1`；DEVLOG 无记录 |
+| v0.2.8 | 2026-10-27 | 见 `git log v0.2.8` | 基线 `v0.2.7.1`（`0bd6096`）；DEVLOG「M18 角色卡并入 M19 工作区」「Skill 仓库与技能调用」两条 |
 
 v0.1.0
 
@@ -469,6 +517,20 @@ v0.2.7.1
 | 新增 | 顶部 Toast：新增 `ui/MToast.qml`，由 `main.qml` 统一持有，资料库导入与解析失败、个性化页背景 / 开屏 / 头像读取失败改由页面顶部弹出；`LibraryPage.qml` 记录已提示的失败文件，历史失败不重复弹；`AvatarCrop.qml` 增加 `errorReported` 信号，图片无法读取时收起裁剪层并转 Toast；`SplashVideo.qml` 增加 `finishPlayback()`，跳过与自然结束共用一次性结束逻辑；`main.qml` 增加开屏层状态（`splashLayerVisible`、`mainOpacity`、`mainRevealed`）与开屏配色映射；文档上限调整：文档类声明上限 1 GB、整文件载入解析的保护阈值 512 MB、图片单张上限 128 MB |
 | 修改 | `main.qml` 窗口底色改为透明，开屏底板移入圆角遮罩内，修复自定义背景与开屏在四角的白色露出；不开开屏时首帧直接显示主内容；离开页面时自动收起该页专属面板（离开对话页关配置面板、离开资料库页关配置抽屉）；`SplashIntro.qml` 删除“播放中 · 有声/静音”小字与进度条，底部只保留小 logo 与品牌名；`SplashVideo.qml` 删除同一组小字、进度条与“正在载入…”提示；`ConversationPage.qml` 增加资料库与联网搜索未就绪原因提示，联网开关开启态改用 `ok` 语义色；`PersonalizationPage.qml` 背景与开屏说明文字写明支持格式与体积上限；`ThemeManager.cpp` 与 `Extractor.h` 抽出字节换算与体积校验工具函数，提示数字由常量推导；`resources/themes/theme2.json` 的 `ok`、`okGhost`、`okHair` 加深，浅蓝主题下的成功态文字更清晰；`ui/Theme.qml` 补成功语义令牌注释；版本号统一为 0.2.7.1（`CMakeLists.txt`、`README.md`、两份手册、`scripts/MeowAi.iss`） |
 | 修复 | 自定义背景与开屏在窗口四角的白色露出；首帧先显示主内容再被开屏覆盖的闪烁；开屏交叉淡化期间尾音继续输出；`PersonalizationPage.qml` 与 `LibraryPage.qml` 文件类错误在页面底部与 Toast 重复展示；体积提示“512 MB 超出 512 MB”一类取整歧义 |
-| 未完成或已知限制 | DEVLOG 没有 v0.2.7.1 条目；`build-mingw\dist\MeowAi.nsi` 不在版本库，安装包只能在本机复现；M17–M20（会话切换页、角色卡、Skill 仓库、Agent 隔离区）未实现；文档类 1 GB 为声明上限，文本 / Office / PDF 解析仍需整文件载入，实际超过 512 MB 会提前拒绝；CI 仍不构建测试；PDFium、分类、备份、升级、视频、OCR、Android/Web 的限制不变 |
+| 未完成或已知限制 | DEVLOG 没有 v0.2.7.1 条目；`build-mingw\dist\MeowAi.nsi` 不在版本库，安装包只能在本机复现；M17–M20 中「角色卡」与「Skill 仓库」已在工作区落地（待验收，见 DEVLOG 2026-10-27 / 2026-10-26 条目），会话切换页与 Agent 隔离区仍未实现；文档类 1 GB 为声明上限，文本 / Office / PDF 解析仍需整文件载入，实际超过 512 MB 会提前拒绝；CI 仍不构建测试；PDFium、分类、备份、升级、视频、OCR、Android/Web 的限制不变 |
 | 证据来源 | v0.2.7.1 分支提交 `82527b0`；`git diff ad3e664`；`git status`；DEVLOG 无 v0.2.7.1 记录 |
 | 状态 | 已交付（Windows 构建与冒烟通过；安装包本机构建；发布记录不完整） |
+
+v0.2.8
+
+| 字段 | 内容 |
+| --- | --- |
+| 版本号 | v0.2.8 |
+| 日期 | 2026-10-27 |
+| commit | 见 `git log v0.2.8`（基线 `v0.2.7.1` / `0bd6096`；本次合入 M18 角色卡与 M19 技能系统两支） |
+| 新增 | **M18 角色卡**：`storage/RoleCardStore.*`（list / get / create / update / remove / exportToFile / importFromFile / nameExists / saveAvatar / avatarUrl）；`ui/RoleCardPanel.qml`（管理弹层：新增 / 编辑 / 删除两段确认 / 导入冲突选择 / 导出补 `.json` / 状态行）；`ui/RoleCardDialog.qml`（表单：厂商 / 模型 / 档位首项「默认」= 跟随当前设置、名称必填去重、提示词可空、头像复用 512×512 裁剪）；`ui/Sidebar.qml` 新增「角色卡」区块（头像 + 名称 + 当前模型，点击即套用，当前生效高亮 + 「已套用」标记）；`core/chat/ChatController` 新增 `systemPrompt` 属性与 `setSystemPrompt`；`core/AppController` 注册 `roleCardStore`；`ui/AvatarCrop.qml` 新增 `externalSave` + `cropped(tempFileUrl)` 钩子。**M19 技能系统**：`core/skill/SkillCatalog.*`（合并、启停、模式、注入编排）、`SkillInstaller.*`（zip 导入与安全校验）、`SkillStateStore.*`（状态文件）；`ui/SkillLibraryPage.qml`（列表 / 详情 / 导入 / 删除 / 启停 / 模式开关）；`ui/ConversationPage.qml` 新增手动模式技能选择入口；`Skill.h` 扩展 `triggers` 与 `SkillSource` 及统一校验规则 `SkillManifestRules`。**测试**：`tests/tst_roecard.cpp`（10 用例）、`tests/tst_skills.cpp`（23 用例，含融合回归 `injectionOrderRoleCardFirstThenTimeThenSkill`） |
+| 修改 | **schema v4 → v5**：`storage/Database.cpp` 新增 `role_cards` 表与 `idx_role_cards_name` 唯一索引，纯增量、`IF NOT EXISTS`、幂等可重复执行，不触碰既有表；**`ChatController` 注入顺序重排**为 `角色卡（index 0）→ 当前时间 → 技能 → 资料库`，M19 原先预留的「角色卡 index 1」作废（角色卡是人格设定，必须排在所有背景资料之前）；角色卡提示词 token 计入资料库注入预算（`historyTokens += estimateTokens(m_systemPrompt)`）；`ui/Sidebar.qml` 卡片行改为「名称优先占宽、模型名最多 45% 并省略」，避免长模型名撑破侧栏；`CMakeLists.txt` 与 `tests/CMakeLists.txt` 同时登记两支新增源码、QML 与测试；版本号统一为 0.2.8（`CMakeLists.txt`、`README.md`、两份手册、`scripts/MeowAi.iss`）；`.gitignore` 补 `screenshots-m*` 与 `.workbuddy-ai/` |
+| 修复 | 角色卡面板在 store 未构造时直接读 `store.available` 会抛空引用（改用 `storeReady` 守卫）；角色卡与技能两支曾在 `Database.cpp` / `ChatController.cpp` / `Sidebar.qml` / `AppController` 上互相覆盖，本次按语义重排而非机械合并；`RoleCardDialog` 头像首字母不随名称实时变化（改为 `nameInitial` 属性 + `onTextChanged` 驱动）；`RoleCardPanel` 导出失败时未提示（补状态行兜底） |
+| 未完成或已知限制 | 当前生效角色卡为内存态（重启回到未套用）；角色卡与技能包的导入 / 导出 UI 未取到自动化截图（原生 `FileDialog` 无法枚举与截图），逻辑由 `tst_roecard` / `tst_skills` 覆盖，仍需人工 UI 验收；技能包导入依赖 Qt 私有头 `QZipReader`（`Qt6::CorePrivate`），Qt 升级需回归，不支持 ZIP64；`build-mingw\dist\MeowAi.nsi` 仍不在版本库，安装包只能本机复现；CI 仍不构建测试目标；会话切换页与 Agent 隔离区仍未实现 |
+| 证据来源 | `git log v0.2.8`；`git diff v0.2.7.1..v0.2.8 --stat`；DEVLOG「2026-10-27 M18 角色卡并入 M19 工作区」「2026-10-26 Skill 仓库与技能调用」；`ctest 28/28`；`MeowAi.exe --smoke-test` 退出码 0 |
+| 状态 | 已交付（Windows 构建、冒烟与全部单测通过；安装包未在本次重建；`screenshots-m18/` 存有本地验收截图，不入库） |

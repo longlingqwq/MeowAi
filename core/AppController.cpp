@@ -11,7 +11,8 @@
 #include "core/retriever/NullRetriever.h"
 #include "core/retriever/RagRetriever.h"
 #include "core/retriever/SectionPicker.h"
-#include "core/skill/SkillRegistry.h"
+#include "core/skill/SkillCatalog.h"
+#include "core/skill/SkillStateStore.h"
 #include "core/theme/ThemeManager.h"
 #include "core/theme/ThemePresetManager.h"
 #include "core/update/UpdateManager.h"
@@ -27,6 +28,7 @@
 #include "storage/LibraryConfigStore.h"
 #include "storage/LibraryStore.h"
 #include "storage/PersonalizationStore.h"
+#include "storage/RoleCardStore.h"
 #include "storage/SecureStore.h"
 #include "storage/SqliteVectorIndex.h"
 #include "storage/ThemeStore.h"
@@ -208,6 +210,16 @@ LibraryController *AppController::libraryController() const
     return m_libraryController.get();
 }
 
+SkillCatalog *AppController::skillCatalog() const
+{
+    return m_skillCatalog.get();
+}
+
+RoleCardStore *AppController::roleCardStore() const
+{
+    return m_roleCardStore.get();
+}
+
 void AppController::initialize()
 {
     // 手册可用性：启动时检测一次（QML 在引擎加载前读取本属性）
@@ -253,9 +265,13 @@ void AppController::initialize()
         setStatusMessage(QStringLiteral("数据库不可用：%1").arg(error));
     }
 
-    m_skills = std::make_unique<SkillRegistry>(m_platform->bundledSkillsRoot());
-    QStringList warnings;
-    const int skillCount = m_skills->scan(&warnings);
+    // 技能（功能 #9 · M19）：状态只落 skills_state.json（不新增数据库表，避免与 M18 迁移冲突）；
+    // 内置技能只读 qrc，用户技能落 AppData/skills，两者由 SkillCatalog 合并（内置优先）。
+    m_skillState = std::make_unique<SkillStateStore>(
+        QDir(m_paths->root()).filePath(QStringLiteral("skills_state.json")));
+    m_skillCatalog = std::make_unique<SkillCatalog>(m_platform->bundledSkillsRoot(),
+                                                    m_paths->skillsDir(), m_skillState.get());
+    m_skillCatalog->reload();
 
     // 安全机制（功能 #5）：Key 加密保险库；无加密能力时仍可创建，但 save 会被拒绝
     m_secureStore = std::make_unique<SecureStore>(m_platform, m_paths->root());
@@ -264,6 +280,10 @@ void AppController::initialize()
     m_chatStore = std::make_unique<ChatStore>(m_database.get());
     m_chatHistory = std::make_unique<ChatHistoryModel>(m_chatStore.get());
     m_chatHistory->reload();
+
+    // 角色卡（M18）：同一 SQLite 的 role_cards 表；头像副本落在 assets/rolecards/，
+    // 数据库不可用时 store 仍可构造（available = false），全部读写安全失败
+    m_roleCardStore = std::make_unique<RoleCardStore>(m_database.get(), m_paths->root(), this);
 
     // 厂商 / 模型目录（v0.2.3）：只读内嵌资源；即便解析失败也不影响其余模块启动
     m_providerCatalog = std::make_unique<ProviderCatalog>();
@@ -310,6 +330,8 @@ void AppController::initialize()
                                               m_webConfigStore.get(), m_webSearch.get());
     m_chat->attachLibrary(m_libraryStore.get(), m_ragRetriever.get(),
                           m_libraryConfigStore.get(), m_fileLevelRetriever.get());
+    // 技能注入（功能 #9）：只挂目录，注入位置与预算由 ChatController + SkillCatalog 决定
+    m_chat->attachSkills(m_skillCatalog.get());
 
     // 资料库 QML 门面（v0.2.5 · M7 + v0.2.6 文件级召回）：由它统一配置 embedding / caption 与挂载列表
     m_libraryController = std::make_unique<LibraryController>(
@@ -330,9 +352,10 @@ void AppController::initialize()
     m_retriever = std::make_unique<NullRetriever>();
 
     setStatusMessage(
-        QStringLiteral("已就绪 · 平台 %1 · 内置技能 %2 个 · 厂商 %3 家 · 密钥后端 %4 · 个性化 %5 · 会话 %6")
+        QStringLiteral("已就绪 · 平台 %1 · 内置技能 %2 个 · 导入技能 %3 个 · 厂商 %4 家 · 密钥后端 %5 · 个性化 %6 · 会话 %7")
             .arg(m_platform->platformId())
-            .arg(skillCount)
+            .arg(m_skillCatalog ? m_skillCatalog->bundledCount() : 0)
+            .arg(m_skillCatalog ? m_skillCatalog->importedCount() : 0)
             .arg(m_providerCatalog ? m_providerCatalog->providerIds().size() : 0)
             .arg(m_secureStore->backendName())
             .arg(m_themeManager && m_themeManager->available() ? QStringLiteral("可用")

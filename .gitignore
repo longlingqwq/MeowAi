@@ -70,3 +70,10 @@ aqtinstall.log
 # ---- Packaging output (installer artifacts) ----
 /dist/
 /产品/
+
+# ---- 验收截图（本地保留，不入库；手册通过文档描述验收结论）----
+/screenshots-m*/
+/screenshots-*/
+
+# ---- 本地工具会话数据 ----
+/.workbuddy-ai/

@@ -24,14 +24,30 @@ const QStringList kVideoExtensions = { QStringLiteral("mp4"), QStringLiteral("mo
 /// 字节 → MB 的换算基准：统一 qint64，避免 32 位 int 溢出
 constexpr qint64 kBytesPerMb = 1024LL * 1024;
 
-constexpr qint64 kFontLimit = 20LL * kBytesPerMb;   // 20 MB
-constexpr qint64 kImageLimit = 128LL * kBytesPerMb; // 128 MB（背景 / 头像与资料库图片统一）
-constexpr qint64 kVideoLimit = 200LL * kBytesPerMb; // 200 MB
+constexpr qint64 kBytesPerGb = 1024LL * kBytesPerMb;
+
+constexpr qint64 kFontLimit = 20LL * kBytesPerMb;    // 20 MB
+constexpr qint64 kImageLimit = 128LL * kBytesPerMb;  // 128 MB（背景 / 头像与资料库图片统一）
+constexpr qint64 kVideoLimit = 1024LL * kBytesPerMb; // 1 GB（开屏视频多为高清素材，单独放宽）
 
 /// 实际体积向上取整到 MB，避免「128 MB 超出 128 MB」这类含糊提示
 qint64 bytesToMbCeil(qint64 bytes)
 {
     return bytes <= 0 ? 0 : (bytes + kBytesPerMb - 1) / kBytesPerMb;
+}
+
+/// 体积可读文案：≥1 GB 用 GB（余数进位到 MB），否则用 MB；让「1024 MB 上限」显示成「1 GB」
+QString formatSize(qint64 bytes)
+{
+    if (bytes >= kBytesPerGb) {
+        const qint64 gb = bytes / kBytesPerGb;
+        const qint64 restMb = bytesToMbCeil(bytes - gb * kBytesPerGb);
+        if (restMb == 0) {
+            return QStringLiteral("%1 GB").arg(gb);
+        }
+        return QStringLiteral("%1 GB %2 MB").arg(gb).arg(restMb);
+    }
+    return QStringLiteral("%1 MB").arg(bytesToMbCeil(bytes));
 }
 
 /// 只保留安全字符，防止导入文件名带出路径穿越或非法字符
@@ -522,9 +538,8 @@ bool ThemeManager::importAsset(const QString &sourcePath, AssetKind kind, const 
         return fail(QStringLiteral("文件为空，无法导入"));
     }
     if (size > limit) {
-        return fail(QStringLiteral("文件过大（%1 MB，上限 %2 MB）")
-                        .arg(bytesToMbCeil(size))
-                        .arg(limit / kBytesPerMb));
+        return fail(QStringLiteral("文件过大（%1，上限 %2）")
+                        .arg(formatSize(size), formatSize(limit)));
     }
 
     const QString dirPath = QDir(m_paths.assetsDir()).filePath(subDir);

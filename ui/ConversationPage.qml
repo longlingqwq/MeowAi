@@ -42,6 +42,13 @@ Item {
     property bool hasAdvanced: false
     /// 等待用户同意后再挂载的小库 id（首次启用资料库时用）
     property int pendingMountId: 0
+    /// 技能集合变更计数（手动模式弹层的空态提示靠它重算）
+    property int skillRevision: 0
+
+    Connections {
+        target: Skills
+        function onSkillsChanged() { page.skillRevision += 1 }
+    }
 
     /// 资料库已挂载但尚不能参与检索的明确原因：优先同意状态，其次复用现有向量化状态字段
     readonly property string libraryHintText: {
@@ -162,6 +169,17 @@ Item {
         default:
             return Chat.hasApiKey ? qsTr("密钥已就绪（未校验）") : qsTr("未配置密钥")
         }
+    }
+
+    /// 手动模式弹层用：是否至少有一个已启用技能（依赖 skillRevision 触发重算）
+    function hasEnabledSkill() {
+        page.skillRevision
+        const list = Skills ? Skills.skills : []
+        for (let i = 0; i < list.length; ++i) {
+            if (list[i].enabled)
+                return true
+        }
+        return false
     }
 
     /// 组装一次发送：用户消息由 core 落库入模型，这里只负责转发与清空输入
@@ -802,10 +820,160 @@ Item {
                         }
                     }
 
+                    // 「技能」入口：仅手动模式出现；选中只对本次发送生效，发送后自动清空
+                    Rectangle {
+                        id: skillToggle
+                        visible: Chat.skillManualMode
+                        width: skillToggleRow.implicitWidth + 20
+                        height: 34
+                        radius: Theme.rPill
+                        color: Chat.pendingSkills.length > 0
+                               ? Theme.accentGhost
+                               : (skillToggleHover.hovered ? Theme.overlayHover : Theme.overlayFaint)
+                        border.width: 1
+                        border.color: Chat.pendingSkills.length > 0
+                                      ? Theme.accentHair : Theme.hairline
+
+                        Behavior on color {
+                            ColorAnimation { duration: Theme.dFast }
+                        }
+
+                        Row {
+                            id: skillToggleRow
+                            anchors.centerIn: parent
+                            spacing: 6
+
+                            Rectangle {
+                                width: 6
+                                height: 6
+                                radius: 3
+                                anchors.verticalCenter: parent.verticalCenter
+                                color: Chat.pendingSkills.length > 0 ? Theme.accent : Theme.textFaint
+                            }
+
+                            Text {
+                                text: Chat.pendingSkills.length > 0
+                                      ? qsTr("技能 · %1").arg(Chat.pendingSkills.length)
+                                      : qsTr("技能")
+                                color: Chat.pendingSkills.length > 0 ? Theme.accent : Theme.textDim
+                                font.pixelSize: Theme.fLabel
+                                font.weight: Font.Medium
+                                anchors.verticalCenter: parent.verticalCenter
+                            }
+                        }
+
+                        HoverHandler { id: skillToggleHover }
+
+                        TapHandler {
+                            onTapped: skillMenu.opened ? skillMenu.close() : skillMenu.open()
+                        }
+                    }
+
+                    Popup {
+                        id: skillMenu
+                        parent: skillToggle
+                        x: 0
+                        y: -height - 8
+                        width: 300
+                        padding: 10
+                        closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
+
+                        background: Rectangle {
+                            radius: Theme.rMd
+                            color: Theme.ink3
+                            border.width: 1
+                            border.color: Theme.hairlineStrong
+                        }
+
+                        contentItem: Column {
+                            spacing: Theme.s1
+
+                            MLabel { label: qsTr("选择技能（最多 2 个）") }
+
+                            Text {
+                                width: 280
+                                visible: !page.hasEnabledSkill()
+                                text: qsTr("没有已启用的技能：去左侧「技能仓库」导入或启用")
+                                color: Theme.textFaint
+                                font.pixelSize: Theme.fLabel
+                                wrapMode: Text.Wrap
+                            }
+
+                            Repeater {
+                                model: Skills ? Skills.skills : []
+
+                                delegate: Item {
+                                    id: skillRow
+                                    required property var modelData
+                                    width: 280
+                                    height: skillRow.modelData.enabled ? 34 : 0
+                                    visible: skillRow.modelData.enabled
+
+                                    Text {
+                                        anchors.left: parent.left
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        width: parent.width - 32
+                                        text: skillRow.modelData.name
+                                        color: Chat.pendingSkills.indexOf(skillRow.modelData.id) >= 0
+                                               ? Theme.accent : Theme.text
+                                        font.pixelSize: Theme.fSmall
+                                        elide: Text.ElideRight
+                                    }
+
+                                    Rectangle {
+                                        anchors.right: parent.right
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        width: 18
+                                        height: 18
+                                        radius: 4
+                                        color: Chat.pendingSkills.indexOf(skillRow.modelData.id) >= 0
+                                               ? Theme.accentGhost : "transparent"
+                                        border.width: 1
+                                        border.color: Chat.pendingSkills.indexOf(skillRow.modelData.id) >= 0
+                                                      ? Theme.accent : Theme.hairlineStrong
+
+                                        Text {
+                                            anchors.centerIn: parent
+                                            visible: Chat.pendingSkills.indexOf(skillRow.modelData.id) >= 0
+                                            text: "\u2713"
+                                            color: Theme.accent
+                                            font.pixelSize: Theme.fLabel
+                                        }
+                                    }
+
+                                    TapHandler {
+                                        cursorShape: Qt.PointingHandCursor
+                                        onTapped: Chat.togglePendingSkill(skillRow.modelData.id)
+                                    }
+                                }
+                            }
+
+                            Row {
+                                spacing: Theme.s2
+
+                                MButton {
+                                    text: qsTr("清除")
+                                    variant: "quiet"
+                                    small: true
+                                    enabled: Chat.pendingSkills.length > 0
+                                    onClicked: Chat.clearPendingSkills()
+                                }
+
+                                MButton {
+                                    text: qsTr("完成")
+                                    variant: "ghost"
+                                    small: true
+                                    onClicked: skillMenu.close()
+                                }
+                            }
+                        }
+                    }
+
                     MField {
                         id: composerField
                         // 下限兜底：窗口再窄也不会把输入框压成负数而溢出行布局
                         width: Math.max(120, parent.width - webToggle.width - libraryToggle.width - sendButton.width
+                                        - (skillToggle.visible ? skillToggle.width + parent.spacing : 0)
                                         - (cancelButton.visible ? cancelButton.width : 0)
                                         - parent.spacing * (cancelButton.visible ? 4 : 3))
                         placeholderText: Chat.busy

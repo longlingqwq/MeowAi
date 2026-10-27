@@ -39,6 +39,60 @@
 
 ## 四、日志（按时间倒序，最新在最上）
 
+### 2026-10-27 ｜ M18 角色卡并入 M19 工作区（两支融合）｜ 状态：待验收
+- **阶段**：阶段三 · 追加模块（M18）
+- **负责人**：融合 Agent（M18 × M19）
+- **分支 / PR**：工作区基于 `v0.2.7.1`；M18 与 M19 两支基于同一基线提交，本次在工作区内逐文件对照融合
+- **背景**：M19（Skill 仓库）与 M18（角色卡）由两个 Agent 并行开发，各自改了同一批文件（`Database.cpp` 迁移、`ChatController` 注入编排、`AppController` 注册、`Sidebar.qml`、`CMakeLists.txt`、`tests/CMakeLists.txt`、`tst_storage.cpp`、`AvatarCrop.qml`）。直接叠加会互相覆盖，因此按「保留两方全部能力、冲突处按语义重排」的原则融合。
+- **交付内容**：
+  - **storage/Database.cpp**：schema 保持 **v5**（M18 的 `role_cards` 表 + `idx_role_cards_name` 唯一索引），与 M19 **不新增表**的取舍天然不冲突；迁移为增量且幂等，v4 数据完好；`tst_storage` 版本断言为「不低于 5」
+  - **storage/RoleCardStore**（新建，M18）：list / get / create / update / remove / exportToFile / importFromFile / nameExists / saveAvatar / avatarUrl；头像副本托管于 `<AppData>/assets/rolecards/`（入库相对路径）；导入三模式 **preview（只探测冲突不写库）/ skip / overwrite**，同名冲突必须由 UI 显式选择，绝不静默覆盖；导出为单个 JSON 数组
+  - **core/chat/ChatController**：M18 的 `systemPrompt` 属性（Q_PROPERTY + `setSystemPrompt`）与 M19 的技能注入合并为**一条固定契约**：`角色卡提示词（index 0，人格设定）→ 当前时间 → 技能 → 资料库检索上下文`。M19 原先预留的「角色卡槽 index 1」按本次实测重排为 **index 0**——角色卡是人格，必须排在所有背景资料之前；空提示词（含纯空白）不下发空 system；提示词 token 计入资料库注入预算（`historyTokens += estimateTokens(m_systemPrompt)`），与检索上下文合计不超既有预算；只改内存、不落库、不重写历史消息，对下一条消息生效
+  - **core/AppController**：同时注册 `m_roleCardStore` 与 `m_skillCatalog`，经 `App.roleCardStore` / `App.skillCatalog` 暴露给 QML，互不影响
+  - **ui/Sidebar.qml**：M18 的「角色卡」区块（会话列表与底部导航之间，头像 + 名称 + 当前模型、点击套用、当前生效高亮、「已套用」标记、空态引导）与 M19 的「技能仓库」导航项并存；卡片行改为「名称优先占宽、模型名最多 45% 并省略」，避免长模型名撑破侧栏
+  - **ui/RoleCardPanel.qml / ui/RoleCardDialog.qml**（新建，M18）：管理面板（新增 / 编辑 / 删除两段确认 / 导入冲突选择 / 导出补 `.json` / 状态行）与表单（厂商 / 模型 / 档位首项「默认」= 跟随当前模型；名称必填去重；提示词可空；头像复用 AvatarCrop 512×512）；存储不可用时整块降级为只读提示（`storeReady` 守卫，避免 `store.available` 在 store 未构造时抛空引用）
+  - **ui/AvatarCrop.qml**：M18 的 `externalSave` + `cropped(tempFileUrl)` 钩子（默认 false，个性化头像流程行为不变）与 M19 的 `errorReported` 信号共存
+  - **构建**：`CMakeLists.txt` 同时登记 M18 新增源码 / QML 与 M19 的技能源码；`tests/CMakeLists.txt` 同时登记 `tst_roecard` 与 `tst_skills`
+- **自测**：构建通过；`ctest` **28/28 通过**（新增 `tests/tst_roecard.cpp` 10 项：v5 建表 / v4 增量升级幂等且保旧数据 / CRUD 与名称去重 / 头像复制解析越界拒绝与随卡清理 / 导出导入往返 / 冲突三模式（skip 不改原卡、overwrite 覆盖内容保 id）/ 损坏文件容错 / 提示词为第一条 system 且早于时间 / 空提示词不产生空 system / 切换只影响下一条且不入库；另在 `tests/tst_skills.cpp` 补 1 项融合回归 `injectionOrderRoleCardFirstThenTimeThenSkill`，端到端断言「角色卡 → 时间 → 技能」）；`MeowAi.exe --smoke-test` 退出码 0；运行日志无 QML 告警
+- **截图**（`screenshots-m18/`）：`00_light_sidebar` 浅色侧栏含角色卡区块、`02_switch_rolecard_gpt5_low` + `02b_config_gpt5_low` 切换后模型条与档位、`03_panel` 管理面板、`04_new_dialog` / `05_new_dialog_filled` / `05_created_card` 新增流程、`07_dark_sidebar` / `08_dark_applied` 深色主题下的卡片样式与高亮
+- **实测**：真实 AppData 库 v4→v5 增量迁移成功（`schema_version=5`，既有 `conversations` 数据完好）；侧栏套用演示卡实测生效——`config.json` 由 `zhipu / glm-5.3 / high` 切到 `openai / gpt-5 / low`，与角色卡字段逐项一致
+- **遗留 / 待定**：
+  - **导出 / 导入 / 删除提示的 UI 截图未取到**：本机桌面被其他顶层窗口抢占前景，`PrintWindow` 抓到的帧与原生 `FileDialog` 不同步，无法稳定复现；对应逻辑已由 `tst_roecard` 覆盖（含冲突三模式），建议人工过一遍 UI 验收
+  - 「当前生效角色卡」为内存态：重启后回到未套用（与系统提示词不落盘一致）
+  - 演示角色卡（喵酱 / 测试助理 / Neko）留在真实库中供人工验收，可在管理面板一键删除
+  - 改 QML 后需确保 rcc 重跑（qrc 依赖时间戳），否则运行的是旧缓存
+- **备注**：两支融合后**注入顺序已从 M19 时期的「时间 → 技能 → 资料库」变为「角色卡 → 时间 → 技能 → 资料库」**。M19 那条记录写于 M18 尚未落地时，保留原样不改（日志只追加）；新增 `tst_skills::injectionOrderRoleCardFirstThenTimeThenSkill` 端到端锁定四种 system 的先后（角色卡 / 时间 / 技能），原有 `injectionOrderFollowsTimeThenSkill` 保持不动，两者共同覆盖「有/无角色卡」两种形态。
+
+### 2026-10-26 ｜ Skill 仓库与技能调用（功能 #9 · M19）｜ 状态：待验收
+- **阶段**：阶段三
+- **负责人**：开发 Agent（M19）
+- **分支 / PR**：工作区基于 `v0.2.7.1`（PR 待创建）
+- **交付内容**：
+  - **core/skill**：`Skill.h` 扩展 manifest（新增 `triggers`、`SkillSource`）与统一校验规则 `SkillManifestRules`（扫描与导入共用一套字段口径）；`SkillRegistry` 支持 triggers 解析与来源标记；新增 `SkillStateStore`（状态文件读写）、`SkillInstaller`（zip 导入与安全校验）、`SkillCatalog`（内置 + 导入合并、启停、模式、注入编排）
+  - **导入安全**：单包 ≤ 20 MB、解压后 ≤ 100 MB、条目 ≤ 2000；**自解析 zip 中央目录**校验条目名（QZipReader 会把 `../x` 静默改写成 `x`，只有看原始字节才能「拒绝」而非「悄悄纠正」）；拒绝绝对路径 / 盘符 / 符号链接 / 多 manifest；id 仅字母数字连字符；`skill.md` 必须存在且非空；缺 triggers 直接拒绝并给出正确示例；与内置同 id 拒绝并要求改名；用户同名按「覆盖更新」处理
+  - **调用逻辑**：注入顺序固定为 `当前时间 → [角色卡槽（M18 预留 index 1）] → 技能 → 资料库`；自动模式按触发词匹配（不区分大小写、中文子串），**主排序为触发词在输入中首次出现位置，同位置按目录顺序**，最多 2 个；手动模式在输入区选择，仅本次发送生效；禁用状态永不注入；总量 4000 字符硬截断且不追加任何提示；无命中不注入空内容
+  - **状态**：`%APPDATA%\MeowAi\skills_state.json`（`{version, mode, enabled{id:bool}}`），**不新增数据库表**，避开 M18 的 v5 迁移
+  - **UI**：新增 `ui/SkillLibraryPage.qml`（列表 / 详情 / 导入 / 删除 / 启停 / 模式开关，导入失败详情在页面内完整展示）；`ui/Sidebar.qml` 新增「技能仓库」导航项；`ui/ConversationPage.qml` 新增手动模式技能选择入口；`ui/main.qml` 仅补第 4 页 host 与标题分支
+  - **构建**：`CMakeLists.txt` 登记新源码 / QML；技能包导入依赖 QtCore 私有 `QZipReader`（`Qt6::CorePrivate`，缺失时编译降级为「拒绝导入」）
+- **自测**：Debug 构建通过；`ctest` **27/27 通过**（新增 `tests/tst_skills.cpp` 22 项：manifest 校验、目录穿越拒绝、体积上限、同 id 冲突 / 覆盖、状态持久化、模式切换、触发词匹配、注入截断、手动选择、删除权限、**端到端注入顺序**）；`MeowAi.exe --smoke-test` 退出码 0；两套主题截图见 `screenshots-m19/`
+- **遗留 / 待定**：
+  - **「自动模式命中后回答」未取到真实截图**：当前环境 `zhipu` 无 Key，`custom` 中转端点返回 HTTP 400；注入内容与顺序已由 `tst_skills::injectionOrderFollowsTimeThenSkill` 用假网络层断言（system[0]=当前时间、system[1]=技能文档）
+  - 导入依赖 Qt 私有头（`QZipReader`），Qt 升级需回归；不支持 ZIP64
+  - 角色卡槽位已预留，M18 落地后需确认顺序仍为「角色卡 → 技能 → 资料库」
+- **备注**：技能注入只增加一条 system 消息，**未改动**流式输出、中断、Token 统计的任何代码路径
+
+### 2026-10-26 ｜ 开屏视频体积上限 200 MB → 1 GB ｜ 状态：已完成
+- **阶段**：阶段三
+- **负责人**：开发 Agent
+- **交付内容**：
+  - `core/theme/ThemeManager.cpp`：`kVideoLimit` 由 `200 MB` 放宽到 `1024 MB`（1 GB）；字体 20 MB、图片 128 MB 维持不变
+  - 新增 `formatSize()`：体积 ≥1 GB 用 GB 表达（余数进位到 MB），超大文件提示由「上限 1024 MB」改为「上限 1 GB」，避免「1024 MB」与「1 GB」两种口径混用
+  - `ui/PersonalizationPage.qml`：开屏区说明文案同步改为「单个文件不超过 1 GB」
+  - `tests/tst_theme.cpp`：新增 `importVideoOversizeRejected`，用**稀疏文件**构造 1025 MB 视频（不实占磁盘），断言导入被拒、提示含「1 GB」、配置未被写入
+- **自测**：`ctest` 全通过（含新增用例）；QML 文案与 `kVideoLimit` 保持一致
+- **遗留 / 待定**：导入仍是**同步复制**，1 GB 视频在机械盘上可能阻塞界面数秒且无进度反馈；如需可改为后台线程 + 进度提示
+- **备注**：只放宽开屏视频；背景图 / 头像维持 128 MB，避免解码超大位图吃内存
+
 ### 2026-10-21 ｜ v0.2.6 热修：通义 embedding 批量上限导致 HTTP 400 ｜ 状态：已修复
 - **阶段**：阶段三
 - **负责人**：总代理

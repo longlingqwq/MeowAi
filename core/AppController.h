@@ -1,5 +1,7 @@
 #pragma once
 
+#include "storage/RoleCardStore.h"
+
 #include <QObject>
 #include <QString>
 
@@ -26,7 +28,8 @@ class ProviderCatalog;
 class RagRetriever;
 class SectionPicker;
 class SecureStore;
-class SkillRegistry;
+class SkillCatalog;
+class SkillStateStore;
 class SqliteVectorIndex;
 class ThemeManager;
 class ThemePresetManager;
@@ -48,6 +51,8 @@ class AppController : public QObject
     Q_PROPERTY(QString platformId READ platformId CONSTANT)
     Q_PROPERTY(bool customTitleBar READ customTitleBar CONSTANT)
     Q_PROPERTY(QString statusMessage READ statusMessage NOTIFY statusMessageChanged)
+    /// 角色卡存储（M18）：初始化后可用；QML 经 App.roleCardStore 读写，不直连数据库
+    Q_PROPERTY(RoleCardStore *roleCardStore READ roleCardStore CONSTANT)
     /// 用户手册是否存在于查找路径中（只读检测，不复制、不改写手册文件）
     Q_PROPERTY(bool userGuideAvailable READ userGuideAvailable NOTIFY userGuideAvailabilityChanged)
 
@@ -84,6 +89,8 @@ public:
     ProviderCatalog *providerCatalog() const;
     /// 会话历史模型（阶段三）；数据库不可用时仍可构造，只是不可持久化
     ChatHistoryModel *chatHistoryModel() const;
+    /// 角色卡存储（M18）：list / get / create / update / remove / 导入导出 / 头像托管
+    RoleCardStore *roleCardStore() const;
 
     // ---- 资料库（阶段二收尾 · v0.2.5）----
     LibraryStore *libraryStore() const;
@@ -93,6 +100,8 @@ public:
     RagRetriever *ragRetriever() const;
     /// 资料库 QML 门面（v0.2.5 · M7）：小库 / 文件 / 索引 / 配置 / 成本预估
     LibraryController *libraryController() const;
+    /// 技能仓库（功能 #9 · M19）：内置 + 导入技能、启用状态、全局模式
+    SkillCatalog *skillCatalog() const;
 
 signals:
     void statusMessageChanged();
@@ -106,7 +115,9 @@ private:
     PlatformAdapter *m_platform = nullptr;
     std::unique_ptr<AppPaths> m_paths;
     std::unique_ptr<Database> m_database;
-    std::unique_ptr<SkillRegistry> m_skills;
+    /// 技能（功能 #9 · M19）：状态文件 + 内置/导入合并目录
+    std::unique_ptr<SkillStateStore> m_skillState;
+    std::unique_ptr<SkillCatalog> m_skillCatalog;
     std::unique_ptr<DocumentRetriever> m_retriever;
     std::unique_ptr<PersonalizationStore> m_personalizationStore;
     std::unique_ptr<ThemeStore> m_themeStore;
@@ -120,6 +131,8 @@ private:
     std::unique_ptr<ChatStore> m_chatStore;
     std::unique_ptr<ChatHistoryModel> m_chatHistory;
     std::unique_ptr<ChatController> m_chat;
+    /// 角色卡（M18）：同一 SQLite 的 role_cards 表 + assets/rolecards 头像副本
+    std::unique_ptr<RoleCardStore> m_roleCardStore;
     /// 资料库（v0.2.5）：存储 / 配置 / 向量化 / 向量索引 / 检索
     std::unique_ptr<LibraryStore> m_libraryStore;
     std::unique_ptr<LibraryConfigStore> m_libraryConfigStore;

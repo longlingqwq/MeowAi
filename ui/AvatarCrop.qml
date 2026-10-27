@@ -26,9 +26,15 @@ Popup {
     property real panY: 0
     /// 错误 / 失败原因（显示在弹层内）
     property string errorText: ""
+    /// 外部保存模式（复用方如角色卡）：true 时确认后不写个性化头像，
+    /// 改为发出 cropped(tempFileUrl)（512×512 临时 PNG）由调用方自行落盘。
+    /// 默认 false，保持「确认即写 Personalize.setAvatar」的原有行为。
+    property bool externalSave: false
 
     /// 头像图片读取失败：交给外层页面的顶部 Toast 展示
     signal errorReported(string message)
+    /// externalSave 为 true 时的确认回调：临时文件已写入，由调用方接管保存
+    signal cropped(string tempFileUrl)
 
     readonly property real minZoom: 1.0
     readonly property real maxZoom: 4.0
@@ -107,6 +113,12 @@ Popup {
             }
             if (!result.saveToFile(target)) {
                 root.errorText = qsTr("裁剪结果写入失败，请检查临时目录权限。")
+                return
+            }
+            // 外部保存模式：临时文件交给调用方，不触碰个性化头像
+            if (root.externalSave) {
+                root.cropped(target)
+                root.close()
                 return
             }
             if (!Personalize.setAvatar(target)) {
@@ -405,7 +417,9 @@ Popup {
                     text: qsTr("确认")
                     variant: "primary"
                     small: true
-                    enabled: previewImage.status === Image.Ready && Personalize.available
+                    // 外部保存模式不依赖个性化存储；默认模式仍需其可用
+                    enabled: previewImage.status === Image.Ready
+                             && (root.externalSave || Personalize.available)
                     onClicked: root.confirmCrop()
                 }
             }

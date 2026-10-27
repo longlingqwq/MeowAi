@@ -13,7 +13,7 @@ import MeowAi
  * 业务全部经 App / Chat / History / Personalize / ThemePreset / Library 转发，本文件不含业务逻辑。
  *
  * 外壳状态（同时是 M2/M3 的接口契约，不写入配置文件）：
- *   pageIndex            0 对话 / 1 个性化 / 2 资料库
+ *   pageIndex            0 对话 / 1 个性化 / 2 资料库 / 3 技能仓库
  *   navCollapsed         左侧导航栏是否缩回为窄条
  *   conversationExpanded 对话导航项下方的会话列表是否展开
  *   libraryConfigOpen    资料库右侧配置抽屉是否打开
@@ -235,7 +235,9 @@ Window {
                 visible: App.customTitleBar
                 targetWindow: root
                 pageTitle: root.pageIndex === 0 ? qsTr("对话")
-                           : (root.pageIndex === 1 ? qsTr("个性化") : qsTr("资料库"))
+                           : (root.pageIndex === 1 ? qsTr("个性化")
+                                                   : (root.pageIndex === 2 ? qsTr("资料库")
+                                                                           : qsTr("技能仓库")))
             }
 
             // ------------------------------------------------ 左侧导航栏（可缩回）
@@ -292,7 +294,9 @@ Window {
 
                             Text {
                                 text: root.pageIndex === 0 ? qsTr("对话")
-                                      : (root.pageIndex === 1 ? qsTr("个性化") : qsTr("资料库"))
+                                      : (root.pageIndex === 1 ? qsTr("个性化")
+                                                              : (root.pageIndex === 2 ? qsTr("资料库")
+                                                                                      : qsTr("技能仓库")))
                                 color: Theme.text
                                 font.pixelSize: Theme.fH1
                                 font.weight: Font.DemiBold
@@ -303,7 +307,9 @@ Window {
                                 visible: root.pageIndex !== 0
                                 text: root.pageIndex === 1
                                       ? qsTr("主题 · 字体 · 背景 · 头像 · 开屏")
-                                      : qsTr("小库 · 关联文件夹 · 检索与成本")
+                                      : (root.pageIndex === 2
+                                         ? qsTr("小库 · 关联文件夹 · 检索与成本")
+                                         : qsTr("内置 · 导入 · 触发词 · 调用模式"))
                                 color: Theme.textFaint
                                 font.pixelSize: Theme.fSmall
                             }
@@ -397,6 +403,17 @@ Window {
 
                         LibraryPage {
                             anchors.fill: parent
+                            onToastRequested: (message, isError) => toastLayer.showToast(message, isError)
+                        }
+                    }
+
+                    // 技能仓库（功能 #9 · M19）：列表 / 详情 / 导入 / 删除 / 启用与模式开关
+                    Item {
+                        id: skillHost
+
+                        SkillLibraryPage {
+                            anchors.fill: parent
+                            anchors.margins: Theme.s5
                             onToastRequested: (message, isError) => toastLayer.showToast(message, isError)
                         }
                     }
