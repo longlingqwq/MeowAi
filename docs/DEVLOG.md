@@ -39,6 +39,27 @@
 
 ## 四、日志（按时间倒序，最新在最上）
 
+### 2026-10-27 ｜ v0.2.8 安装包构建与 GitHub Release 发布 ｜ 状态：已发布
+- **阶段**：阶段四 · 命名打包（Windows）
+- **负责人**：发布 Agent
+- **分支 / PR**：`v0.2.8` 分支，提交 `3b2d413`，标签 `v0.2.8`
+- **背景**：v0.2.8 代码与文档已合入并推送，但 `产品/` 里仍是 0.2.7.1 的产物。本次重建安装包并首次建立 GitHub Release 分发渠道。
+- **交付内容**：
+  1. **暂存部署**：`windeployqt --release --qmldir ui --no-translations --compiler-runtime` 把 `MeowAi.exe` 与 Qt 运行库部署到 `build-mingw/installer-stage/`，得 **1372 个文件 / 128 MB**（45 个 DLL + 5 个 qml 模块目录 + ffmpeg / windows 两个多媒体后端插件）。
+  2. **暂存目录独立冒烟**：在 `installer-stage/` 内直接跑 `MeowAi.exe --smoke-test`，退出码 **0**，确认部署产物不依赖开发机 PATH 中的 Qt。
+  3. **NSIS 打包**：`build-mingw/dist/MeowAi.nsi` 版本字段同步为 `0.2.8`，`VIProductVersion` / `VIAddVersionKey` 全部改 `0.2.8.0`（NSIS 要求四段式），`makensis` 输出 `MeowAi-Setup-0.2.8.exe`，**34119252 字节（32.54 MB）**，MD5 `422f136c3d5463b63e379086c739724a`。
+  4. **安装闭环验证**：静默安装 `/S /D=D:\tmp_meowai_verify` → 落地 **1373 个文件**（多出 `Uninstall.exe`）→ 安装后程序冒烟退出码 **0** → 卸载 `/S _?=<目录>` → 注册表 `HKCU\Software\MeowAi` 与 `HKCU\Software\Microsoft\Windows\CurrentVersion\Uninstall\MeowAi` 均已删除，目录仅剩 `Uninstall.exe` 自身。
+  5. **GitHub Release**：新建标签 `v0.2.8`（注解标签，指向 `3b2d413`）并上传附件，发布说明含新增功能、注入顺序契约、schema 变更、已知限制、安装步骤与验证记录。附件回传 MD5 与本地一致。
+- **自测**：`ctest` **28/28 通过**（16.61s）；`MeowAi.exe --smoke-test` 退出码 0（源码树、暂存目录、安装后三处均验）；安装 / 卸载闭环无残留；下载回传附件 MD5 一致。
+- **遗留 / 待定**：
+  - 卸载后 `Uninstall.exe` 自身残留，这是 NSIS 使用 `_?=` 指定目录时的固有行为（卸载器无法删除正在运行的自身）。真实安装路径下卸载器会先复制到 `%TEMP%` 再执行，不会残留；本次验证是为避免污染系统安装目录而刻意用了 `_?=`。
+  - 安装包未签名，SmartScreen 仍会提示。
+  - `build-mingw/dist/MeowAi.nsi` 仍不纳入版本库，打包脚本只能本机复现；`scripts/MeowAi.iss`（Inno Setup）与实产出的 NSIS 包是两套脚本，版本字段需各自同步。
+- **备注**：
+  - 本机**未安装 Inno Setup**，`scripts/MeowAi.iss` 无法直接编译；实际打包走 NSIS（`C:\Program Files (x86)\NSIS\makensis.exe`）。两条链路并存但只有 NSIS 被验证过。
+  - NSIS 打包有 1 个警告 `9100: ... without standard key "LegalCopyright"`，仅缺版本资源里的版权字段，不影响安装与运行。若要去掉，在 nsi 里补 `VIAddVersionKey "LegalCopyright" "..."`。
+  - 仓库原先**没有任何 tag 与 Release**，分支模型是「每个版本一个分支」。本次同时补上标签与 Release，后续发布可沿用 `releases/tag/vX.Y.Z` 作为固定下载入口。
+
 ### 2026-10-27 ｜ M18 角色卡并入 M19 工作区（两支融合）｜ 状态：待验收
 - **阶段**：阶段三 · 追加模块（M18）
 - **负责人**：融合 Agent（M18 × M19）

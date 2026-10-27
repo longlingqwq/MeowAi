@@ -18,12 +18,12 @@ MeowAi 把“和大模型对话”和“查自己的文档”放在同一个窗�
 
 ## 快速开始（普通用户）
 
-1. 运行安装包 `MeowAi-Setup-0.2.8.exe`。按当前用户安装到 `%LOCALAPPDATA%\Programs\MeowAi`，不需要管理员权限。
+1. 从 [Releases](https://github.com/longlingqwq/MeowAi/releases/latest) 下载 `MeowAi-Setup-0.2.8.exe`，双击运行。按当前用户安装到 `%LOCALAPPDATA%\Programs\MeowAi`，不需要管理员权限。
 2. 首次运行会播放内置开屏动画，可点右上角“跳过”。
 3. 打开次顶部 Dock 的“配置”，填入厂商、模型与 API Key，点“验证”确认可用。
 4. 进入“资料库”导入文件，在右侧配置抽屉里设置 embedding 模型，等索引完成后即可在对话中引用。
 
-安装包未签名，Windows 首次运行会提示 SmartScreen，需要点“更多信息 → 仍要运行”。
+安装包未签名，Windows 首次运行会提示 SmartScreen，需要点“更多信息 → 仍要运行”。安装包大小 32.54 MB，MD5 `422f136c3d5463b63e379086c739724a`。
 
 完整操作步骤见 [docs/USER_GUIDE.md](docs/USER_GUIDE.md)。
 

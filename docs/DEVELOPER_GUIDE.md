@@ -142,7 +142,9 @@ PDFium。PDF 解析依赖 `third_party/pdfium`。运行 `pwsh scripts/fetch-pdfi
 
 打包。先构建 Release，再用 `windeployqt --release --qmldir ui` 把 `MeowAi.exe` 与 Qt 运行库部署到临时目录，最后编译安装脚本。仓库内提供 Inno Setup 脚本 `scripts/MeowAi.iss`，`#define AppVersion "0.2.8"`，输出 `dist\MeowAi-Setup-0.2.8.exe`。本地实际打包另用 NSIS 脚本 `build-mingw\dist\MeowAi.nsi`（构建目录，不纳入版本库），版本字段需同步为 0.2.8，图标取自 `resources/branding/app.ico`。两种安装程序都按当前用户安装，默认目录 `C:\Users\<用户名>\AppData\Local\Programs\MeowAi`，不需要管理员权限。安装包内附带 `docs/USER_GUIDE.md`，个性化页的“打开用户手册”直接定位到该文件；发布时把安装包和两份手册放进同一个发放目录。
 
-当前交付状态。`产品/` 目录里有 `MeowAi-Setup-0.2.7.1.exe`（NSIS 构建，约 33.3 MB）与 `MeowAi-Setup-0.2.7.exe`（历史产物）。`产品/` 被 `.gitignore` 忽略，不在版本库内。仓库没有 `dist/`。`scripts/MeowAi.iss` 的版本号已随 v0.2.8 提交为 `0.2.8`，但 **v0.2.8 安装包尚未重建**，`产品/` 里仍是 0.2.7.1 的产物；需要发布时按 `#define AppVersion` 重新编译安装脚本。
+当前交付状态。**v0.2.8 安装包已构建并发布**：`产品/MeowAi-Setup-0.2.8.exe`（NSIS 构建，32.54 MB，MD5 `422f136c3d5463b63e379086c739724a`），已作为首个 GitHub Release 上传到 `https://github.com/longlingqwq/MeowAi/releases/tag/v0.2.8`，下载地址 `https://github.com/longlingqwq/MeowAi/releases/download/v0.2.8/MeowAi-Setup-0.2.8.exe`。`产品/` 与 `dist/` 都被 `.gitignore` 忽略，不在版本库内，二进制只走 Release 附件分发。
+
+v0.2.8 打包链路实测：Release 构建 → `windeployqt --release --qmldir ui --no-translations --compiler-runtime` 部署到 `build-mingw/installer-stage/`（1372 个文件、128 MB）→ 暂存目录内单独跑 `--smoke-test` 退出码 0 → `makensis build-mingw/dist/MeowAi.nsi` 压缩到 32.54 MB。安装包经过完整闭环验证：静默安装 `/S /D=<临时目录>` 落地 1373 个文件（含 `Uninstall.exe`）→ 安装后程序冒烟退出码 0 → 卸载后注册表键 `HKCU\Software\MeowAi` 与 `...\Uninstall\MeowAi` 均已删除、目录仅剩卸载器自身（NSIS 用 `_?=` 时的固有行为，真实路径会先复制到临时目录）。下载回传的附件 MD5 与本地一致，确认上传无损。
 
 冒烟检查。`MeowAi.exe --smoke-test` 在主界面加载后立即退出。退出码 0 只说明 QML 根对象加载成功，不覆盖配置、网络、数据库和资料库功能。程序是 WIN32 GUI 子系统，终端看不到标准输出，但可以读退出码：
 
@@ -212,7 +214,7 @@ v0.2.8 相比 v0.2.7.1 的增量：M18 角色卡（schema v5 + 侧栏区块 + �
 - v0.2.7.1 的安装包在本地用 NSIS 脚本构建，该脚本位于 `build-mingw\dist\`，不纳入版本库。
 - CI 不构建测试目标，测试证据只能来自本地。
 - 仓库没有 `third_party/pdfium`，源码构建不能解析 PDF 文本层。
-- 仓库没有 `dist/`，安装包只在被忽略的 `产品/` 目录里。
+- 仓库没有 `dist/`，安装包只在被忽略的 `产品/` 目录与 GitHub Release 附件里。`build-mingw/dist/` 是构建目录下的本地产物目录，同样不入库。
 - 安装向导只有英文。
 - 应用内升级是骨架，检查更新必定失败。
 - 文件分类和修改前备份是骨架，界面没有入口。
@@ -380,7 +382,7 @@ pwsh scripts/fetch-pdfium.ps1
 
 ## 14. 版本变更记录（v0.1.0 → v0.2.8）
 
-仓库没有 annotated tag 历史，原有版本标识实际是分支 ref。2026-10-22 为 v0.2.3、v0.2.4 补建了本地 annotated tag，均指向合并提交 `9661eff`；标签未推送远端。
+仓库早期的版本标识实际是分支 ref，没有 tag 历史。2026-10-22 为 v0.2.3、v0.2.4 补建了本地 annotated tag，均指向合并提交 `9661eff`，未推送远端。2026-10-27 为 v0.2.8 建了 annotated tag 并**推送至远端**，同时建立仓库首个 GitHub Release 承载安装包附件；v0.2.8 之前的版本仍无 Release。
 
 | 版本 | 日期 | commit | 证据来源 |
 | --- | --- | --- | --- |
@@ -532,5 +534,5 @@ v0.2.8
 | 修改 | **schema v4 → v5**：`storage/Database.cpp` 新增 `role_cards` 表与 `idx_role_cards_name` 唯一索引，纯增量、`IF NOT EXISTS`、幂等可重复执行，不触碰既有表；**`ChatController` 注入顺序重排**为 `角色卡（index 0）→ 当前时间 → 技能 → 资料库`，M19 原先预留的「角色卡 index 1」作废（角色卡是人格设定，必须排在所有背景资料之前）；角色卡提示词 token 计入资料库注入预算（`historyTokens += estimateTokens(m_systemPrompt)`）；`ui/Sidebar.qml` 卡片行改为「名称优先占宽、模型名最多 45% 并省略」，避免长模型名撑破侧栏；`CMakeLists.txt` 与 `tests/CMakeLists.txt` 同时登记两支新增源码、QML 与测试；版本号统一为 0.2.8（`CMakeLists.txt`、`README.md`、两份手册、`scripts/MeowAi.iss`）；`.gitignore` 补 `screenshots-m*` 与 `.workbuddy-ai/` |
 | 修复 | 角色卡面板在 store 未构造时直接读 `store.available` 会抛空引用（改用 `storeReady` 守卫）；角色卡与技能两支曾在 `Database.cpp` / `ChatController.cpp` / `Sidebar.qml` / `AppController` 上互相覆盖，本次按语义重排而非机械合并；`RoleCardDialog` 头像首字母不随名称实时变化（改为 `nameInitial` 属性 + `onTextChanged` 驱动）；`RoleCardPanel` 导出失败时未提示（补状态行兜底） |
 | 未完成或已知限制 | 当前生效角色卡为内存态（重启回到未套用）；角色卡与技能包的导入 / 导出 UI 未取到自动化截图（原生 `FileDialog` 无法枚举与截图），逻辑由 `tst_roecard` / `tst_skills` 覆盖，仍需人工 UI 验收；技能包导入依赖 Qt 私有头 `QZipReader`（`Qt6::CorePrivate`），Qt 升级需回归，不支持 ZIP64；`build-mingw\dist\MeowAi.nsi` 仍不在版本库，安装包只能本机复现；CI 仍不构建测试目标；会话切换页与 Agent 隔离区仍未实现 |
-| 证据来源 | `git log v0.2.8`；`git diff v0.2.7.1..v0.2.8 --stat`；DEVLOG「2026-10-27 M18 角色卡并入 M19 工作区」「2026-10-26 Skill 仓库与技能调用」；`ctest 28/28`；`MeowAi.exe --smoke-test` 退出码 0 |
-| 状态 | 已交付（Windows 构建、冒烟与全部单测通过；安装包未在本次重建；`screenshots-m18/` 存有本地验收截图，不入库） |
+| 证据来源 | `git log v0.2.8`；`git diff v0.2.7.1..v0.2.8 --stat`；DEVLOG「2026-10-27 M18 角色卡并入 M19 工作区」「2026-10-26 Skill 仓库与技能调用」；`ctest 28/28`；`MeowAi.exe --smoke-test` 退出码 0；GitHub Release `v0.2.8`（附件 34119252 字节，回传 MD5 与本地一致） |
+| 状态 | 已交付（Windows 构建、冒烟与全部单测通过；安装包已重建 32.54 MB 并发布到 GitHub Releases `v0.2.8`；`screenshots-m18/` 存有本地验收截图，不入库） |
